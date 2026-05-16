@@ -30,6 +30,7 @@
 
 | 文档 | 内容 |
 |---|---|
+| [`api-reference.md`](./docs/api-reference.md) | **完整 API 手册**（90 KB / 15 章 / 70 子章）：所有 SDK API 详尽描述 — `AgentBuilder` 全部链式方法 / `Agent.run` + `run_stream` / 10 个 Plugin Protocols / `LLMReplayStore` / `EventBusReader` / 错误类全表 / 环境变量速查 |
 | [`advanced-development-guide.md`](./docs/advanced-development-guide.md) | **进阶最佳实践**：TURBO 哲学 + Plugin 设计原则 + 工具设计哲学 + ACT 编写最佳实践 + 基础设施速查 + 测试方法论 |
 | [`runtime-install.md`](./docs/runtime-install.md) | runtime wheel 装机指南（**runtime 上线后启用**） |
 
