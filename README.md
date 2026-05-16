@@ -9,7 +9,7 @@
 
 | 能力 | 状态 |
 |---|---|
-| `pip install krow-agent-sdk` | ✅ [PyPI 0.8.12.4 已发布](https://pypi.org/project/krow-agent-sdk/) |
+| `pip install krow-agent-sdk` | ✅ [PyPI 0.8.12.5 已发布](https://pypi.org/project/krow-agent-sdk/) |
 | 写 plugin + 用 `LLMReplayStore` record/replay 跑单元测试 | ✅ 完整可用 |
 | 私有 runtime wheel + Krow Cloud reverse proxy | 🚧 v1.1 设计完成，cloud team 实施中（详 [`roadmap.md`](./docs/roadmap.md)） |
 | `agent.run()` 端到端真实跑 agent | 🚧 等 runtime 上线 |
@@ -87,4 +87,5 @@ agent.shutdown()
 
 ---
 
-> 文档版本：`krow-sdk-docs` 跟 `krow-agent-sdk==0.8.12.4` 同步发布。
+> 文档版本：`krow-sdk-docs` 跟随 `krow-agent-sdk` PyPI 主版本同步发布；当前最新发布
+> 跟 PyPI 主版本对齐（参 [PyPI 项目页](https://pypi.org/project/krow-agent-sdk/)）。

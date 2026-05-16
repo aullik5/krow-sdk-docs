@@ -961,5 +961,6 @@ def test_my_journey_real_llm(real_llm_available):
 
 ---
 
-> 文档版本：跟 `krow-agent-sdk==0.8.12.4` 同步。本文档持续吸纳社区反馈 — 欢迎到
-> [GitHub Discussions](https://github.com/aullik5/krow-sdk-docs/discussions) 提建议。
+> 文档版本：跟随 `krow-agent-sdk` PyPI 主版本同步发布；当前与最新 patch 对齐
+> （当前 PyPI: <https://pypi.org/project/krow-agent-sdk/>）。本文档持续吸纳社区反馈 —
+> 欢迎到 [GitHub Discussions](https://github.com/aullik5/krow-sdk-docs/discussions) 提建议。
