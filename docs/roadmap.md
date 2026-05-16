@@ -48,11 +48,12 @@
   - **W2（2026-05-23 周）等 Cloud team 🚧**：bucket+IAM+staging gateway → SDK 拿到 staging endpoint 后跑 `--base-url https://api-staging.krow.cn` 联调
   - **W3 SDK 侧 ✅ 完成（2026-05-17 提前到 W1 一并交付，0.8.12.7）**：
     - **W3 Day 1 (7) `packages/krow-sdk-install/` CLI 子包**：src layout（`__init__/cli/client/platform/errors/__main__`）+ console_scripts entry_point + 21 单测（PEP 503 parser + sha256 + 鉴权黄金模板 + tag 检测 + select wheel）+ `sdk-build.yml::install-cli-build/smoke`（3 OS × py3.11/3.13 = 6 matrix）✅
-    - **W3 Day 1 (8) Pilot onboarding 文档**：私有 `docs/sdk/pilot-onboarding.md`（运营 SOP + P0 quick-look + feedback 模板 + 失败回退）+ 公开 `runtime-install.md` §8 pilot 申请段（5-10 名外部开发者首批试装）✅
+    - **W3 Day 1 (8) Pilot onboarding 文档**：私有 `docs/sdk/pilot-onboarding.md`（W2-W3 SDK team 自联调 SOP + P0 quick-look + 失败回退）+ 公开 `runtime-install.md` §8 Public Beta 时间表 ✅
+    - **2026-05-17 决策更新**：跳过封闭 Pilot 阶段（原计划 5-10 名审核入选客户），W4 staging 联调通过即直接 Public Beta（任何 `KROW_API_KEY` 即可装），运营成本更低 + 不阻塞工程节奏 ✅
   - **W4（2026-05-30 周）真实 LLM E2E + 联调 🚧**：
     - **W4 预期结果卡 ✅**：`tests/sdk/_expected_results/w1_w4_runtime_install_journey.md`（Stage 1 unit mock 反向代理 + Stage 2 nightly real LLM 多维断言）
     - **W4 测试代码 ✅**：`tests/sdk/test_journey_runtime_install_real_llm.py`（9 测试：mock 反向代理全链路 happy + 401/429/sha256mismatch/network/platform_unsupported 错误路径 + nightly real_llm + CLI argparse）+ nightly workflow 自动收 ✅
-    - **W4 真实联调 🚧**：等 Cloud team prod gateway 上线 + 5-10 pilot 客户邀请 → 切生产 endpoint 跑全链路
+    - **W4 真实联调 🚧**：等 Cloud team prod gateway 上线 → SDK team owner 三平台自联调通过 → 直接 Public Beta（公开任何 KROW_API_KEY 用户）
 - M10（watermark）✅ 完成
 - M11（telemetry）✅ 完成
 - Tier 1-5 死代码清理 ✅ 完成
@@ -116,5 +117,5 @@
 
 - ✅ PyPI 主站已稳定迭代（`0.8.12.5` 已发）；EULA 仍处 v1.1 DRAFT（good-faith disclosure）
 - 🚧 EULA v1.x EFFECTIVE：等真律师签字（建议中国大陆 + 香港双 review，~14 天），预计 **2026-06-19 (T+35)** 可达成；签字后下版 hotfix 发布移除 disclosure
-- 🚀 M9 runtime W1-W4 上线节奏：W1 = 2026-05-17 周 / W4 = 2026-06，3-5 pilot 客户先行体验
+- 🚀 M9 runtime W1-W4 上线节奏：W1 = 2026-05-17 周 / W4 = 2026-06；2026-05-17 决策：跳过封闭 Pilot，直接 Public Beta（任何 KROW_API_KEY 即可装）
 - ✅ 公开文档完整：quickstart / external-developer-onboarding / runtime-install / advanced-development-guide / api-reference / roadmap / EULA 7 份对外文档同步自 monorepo
