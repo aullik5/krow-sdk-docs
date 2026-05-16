@@ -31,8 +31,8 @@
 - M1-M4（PyPI 子包 + OIDC publish）✅ 完成
 - M5-M7（dual-build + nightly + SBOM + headless-bridge）✅ 完成
 - M8（Cython spike + `sdk-runtime-build.yml` 9-wheel matrix）✅ 完成（**注**：roadmap 历史版本误标 M9 为 ✅，实际未上线，详下）
-- **M9（sdk-runtime 私有发布 + `krow-sdk-install` bridge）设计 ✅ / 实施启动 🚀**：
-  - 设计文档齐备（`runtime-install-bridge-design.md` + `source-protection-design.md` + `cloud-runtime-proxy-spec.md` v1.0 + `cloud-team-response-ack.md`）
+- **M9（sdk-runtime 私有发布 + `krow-sdk-install` bridge）设计 ✅ / W1+W3 SDK 侧 ✅ / W2+W4 等 Cloud team 🚧**：
+  - 设计文档齐备（`runtime-install-bridge-design.md` + `source-protection-design.md` + `cloud-runtime-proxy-spec.md` v1.1 + `cloud-team-response-ack.md`）
   - **2026-05-15**：原设计走 GH Packages PyPI 已 deprecated → 决策切换到 v2 reverse proxy
   - **2026-05-16 协议锁定**：Cloud team 答复（`cloud-team-response.md`）+ SDK team 确认（`cloud-team-response-ack.md`）→ **W1 启动**
     - Storage：火山引擎 TOS（cn-shanghai，bucket `krow-sdk-runtime`，S3 兼容接口）
@@ -41,11 +41,18 @@
     - 套餐 entitlement：Free 无 / Basic 10 次/天 / Pro 50 次/天 / Premium 无限
     - SLA：M9 99.5% → M10+ 99.9%
     - 计费：M9 暂不收费（套餐内含），预留 hook
-  - **W1**（2026-05-17 周）：Cloud bucket+IAM；SDK 提供 manifest sample（`cloud-runtime-manifest-sample.json` 已交付）+ 改 publish job 走 TOS（已交付）
-  - **W2**：Cloud staging + SDK 真实上传 IAM 联调
-  - **W3**：双方联调 + 验收清单 §8 全过 + `krow-sdk-install --base-url` staging
-  - **W4**：Cloud prod + 3-5 pilot 客户开放
-  - SDK 侧 `packages/krow-sdk-install/` CLI 子包待建（W3 Day 1 之前）
+  - **W1 SDK 侧 ✅ 完成（2026-05-17，0.8.12.7）**：
+    - W1 Day 1：`cloud-runtime-manifest-sample.json` + `sdk-runtime-build.yml::publish-tos` job（v1.1 schema + atomic latest.json upload）✅
+    - W1 Day 2：CI lint 守门（`scripts/lint_subpackage_invariants.py` 19 项 含 v2 reverse-proxy 关键词）✅
+    - **W1 Day 3：测试 wheel fixture（`scripts/sdk_runtime_make_test_wheels.py` 9 wheel matrix + manifest/latest 生成 + 12 单测）+ workflow `fast_mode` dispatch（dry-run < 5 min vs cython 30 min；publish-tos fast-mode 跳真实 PUT）✅**
+  - **W2（2026-05-23 周）等 Cloud team 🚧**：bucket+IAM+staging gateway → SDK 拿到 staging endpoint 后跑 `--base-url https://api-staging.krow.cn` 联调
+  - **W3 SDK 侧 ✅ 完成（2026-05-17 提前到 W1 一并交付，0.8.12.7）**：
+    - **W3 Day 1 (7) `packages/krow-sdk-install/` CLI 子包**：src layout（`__init__/cli/client/platform/errors/__main__`）+ console_scripts entry_point + 21 单测（PEP 503 parser + sha256 + 鉴权黄金模板 + tag 检测 + select wheel）+ `sdk-build.yml::install-cli-build/smoke`（3 OS × py3.11/3.13 = 6 matrix）✅
+    - **W3 Day 1 (8) Pilot onboarding 文档**：私有 `docs/sdk/pilot-onboarding.md`（运营 SOP + P0 quick-look + feedback 模板 + 失败回退）+ 公开 `runtime-install.md` §8 pilot 申请段（5-10 名外部开发者首批试装）✅
+  - **W4（2026-05-30 周）真实 LLM E2E + 联调 🚧**：
+    - **W4 预期结果卡 ✅**：`tests/sdk/_expected_results/w1_w4_runtime_install_journey.md`（Stage 1 unit mock 反向代理 + Stage 2 nightly real LLM 多维断言）
+    - **W4 测试代码 ✅**：`tests/sdk/test_journey_runtime_install_real_llm.py`（9 测试：mock 反向代理全链路 happy + 401/429/sha256mismatch/network/platform_unsupported 错误路径 + nightly real_llm + CLI argparse）+ nightly workflow 自动收 ✅
+    - **W4 真实联调 🚧**：等 Cloud team prod gateway 上线 + 5-10 pilot 客户邀请 → 切生产 endpoint 跑全链路
 - M10（watermark）✅ 完成
 - M11（telemetry）✅ 完成
 - Tier 1-5 死代码清理 ✅ 完成
@@ -54,6 +61,8 @@
 - ✅ `krow-agent-sdk==0.8.12.3` 已发 PyPI 主站（2026-05-15）
 - ✅ `0.8.12.4` 已发（2026-05-15）：README + LICENSE 内私有仓链接修订
 - ✅ `0.8.12.5` 已发（2026-05-16）：`pyproject.toml [project.urls]` 修指公开文档仓 + 公开文档完善（advanced-development-guide / api-reference 上线）
+- ✅ `0.8.12.6` 已发（2026-05-16）：公开文档全审查 + 30 个 doc-drift 单测 + 3 个真实 LLM E2E (`with_<cat>_model` + `run_stream`) + lint_subpackage_invariants 19 项 v2 reverse-proxy 关键词守门
+- 🚀 `0.8.12.7` 准备发（2026-05-17）：M9 W1-W4 SDK 侧实施完整交付（W1 测试 wheel + W3 install-cli 子包 + Pilot onboarding + W4 真实 LLM E2E 预期结果卡 + 9 测试 nightly 收）
 - 🚧 EULA v1.1 仍为 DRAFT（good-faith disclosure）；等真律师签字 → v1.x EFFECTIVE → 移除 disclosure
 - 🚀 M9 runtime 上线工作（v2 reverse proxy 4 周 W1-W4 实施中 · 2026-05-16 协议锁定）
 
