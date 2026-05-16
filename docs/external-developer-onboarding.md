@@ -15,22 +15,28 @@
 2. 充值至少 **¥1**（够你跑 1 周 hello-world 实验，约 50-100 个 LLM 调用）
 3. （可选）登录 [krow.cn](https://krow.cn) 客户端确认 key 状态 + 余额
 
-### Step 2: 装 SDK（公开包 + dev 私有 runtime）
+### Step 2: 装 SDK（公开包 + 私有 runtime）
 
-> **当前发布状态**（2026-05-15）：
-> - ✅ `krow-agent-sdk==0.8.12.4` 已发 PyPI 主站 → 直接 `pip install krow-agent-sdk`
-> - 🚧 私有 runtime wheel + `krow-sdk-install` CLI 处于 M9 上线工作中（详 [`roadmap.md`](./roadmap.md)）
+> **当前发布状态**（2026-05-16）：
+> - ✅ `krow-agent-sdk==0.8.12.5` 已发 PyPI 主站 → 直接 `pip install krow-agent-sdk`
+> - 🚀 私有 runtime wheel + `krow-sdk-install` CLI 处于 M9 v2 reverse-proxy **W1-W4 实施中**（与 Cloud team 协议锁定，详 [`runtime-install.md`](./runtime-install.md) + [`roadmap.md`](./roadmap.md)）
 >
-> **现阶段外部开发者**：可写 plugin + 用 `LLMReplayStore` record/replay 跑单元测试；`agent.run()` 真实跑需等 M9 完成。
->
-> 下面 monorepo 路径**仅 Krow team collaborator 可用**。
+> **现阶段外部开发者**：可写 plugin + 用 `LLMReplayStore` record/replay 跑单元测试；`agent.run()` 真实跑需等 M9 完成（预计 2026-06）。
 
-#### 路径 A：monorepo 直装（推荐给试用阶段）
+#### 推荐：一行 PyPI 装机
 
 ```bash
-# (内部 monorepo 私有；外部开发者请用 `pip install krow-agent-sdk`)
-# # (内部 monorepo 私有；外部开发者请用 `pip install krow-agent-sdk`)
-# git clone https://github.com/aullik5/krow.git    # 你应该有 collaborator 权限
+pip install krow-agent-sdk
+# 或带 extras：
+pip install "krow-agent-sdk[office,visual,knowledge,remote]"
+# 全装：
+pip install "krow-agent-sdk[all]"
+```
+
+#### Collaborator 模式：monorepo 直装（仅 Krow team collaborator）
+
+```bash
+git clone https://github.com/aullik5/krow.git
 cd krow
 python -m venv .venv
 .venv\Scripts\activate           # Windows
@@ -38,16 +44,15 @@ python -m venv .venv
 pip install -e ".[sdk]"
 ```
 
-#### 路径 B：dev wheel + runtime（推荐给已经熟悉的开发者）
+#### M9 完成后：runtime wheel 装机
 
 ```bash
-# 1. 装公开 SDK（dev wheel from GitHub Actions artifacts）
-gh run download <latest_sdk-build_run_id> -n krow-agent-sdk-dist
-pip install krow_agent_sdk-*.whl
+# 1. 装公开 SDK
+pip install krow-agent-sdk
 
-# 2. 装私有 runtime wheel（含核心算法）
+# 2. 装私有 runtime wheel（M9 完成后；用你的 KROW_API_KEY 通过 Krow Cloud 反向代理拉 wheel）
 krow-sdk-install --api-key $KROW_API_KEY
-# 自动用你的 API key 换短期 PAT，从 GitHub Packages 私有 index 装 runtime
+# 详细机制见 runtime-install.md（v2 reverse-proxy）
 ```
 
 ### Step 3: 跑通 Hello, Krow
@@ -132,28 +137,45 @@ from krow_agent_sdk.protocols import ACTPlugin
 
 
 class ResearchPaperReader:
-    """让 agent 学会"读论文 → 抽四要素 → 落 evidence" 的 ACT plugin."""
-    
-    plugin_id = "acme.research_paper"  # 双段 "<org>.<plugin_name>"
-                                       # 详 modules/agent/sdk/_plugin_id_validator.py
+    """让 agent 学会"读论文 → 抽四要素 → 落 evidence" 的 ACT plugin.
+
+    协议 SSOT: krow_agent_sdk.protocols.ACTPlugin
+        - plugin_id (property, str) — 双段 "<org>.<plugin_name>"
+        - act_name (property, str) — ACT 名称
+        - get_act_root() -> Path — ACT 资源根目录
+        - get_act_file_path() -> Path — 主 ACT markdown 文件 (ext_<name>.md)
+        - get_tool_names() -> list[str] — 该 ACT 启用的工具白名单
+    """
+
+    plugin_id = "acme.research_paper"  # 双段 "<org>.<plugin_name>"，正则
                                        # ^[a-z0-9_-]{3,20}\.[a-z0-9_]{3,30}$
+    act_name = "research_paper"        # 通常等于 plugin_id 的第二段
 
     def get_act_root(self) -> Path:
-        return Path(__file__).parent / "acts"
+        return Path(__file__).parent / "acts" / "research_paper"
 
-    def get_act_names(self) -> list[str]:
-        return ["research_paper"]
+    def get_act_file_path(self) -> Path:
+        return self.get_act_root() / "ext_research_paper.md"
+
+    def get_tool_names(self) -> list[str]:
+        return [
+            "read_file",
+            "read_document",
+            "search_files",
+            "ai_search",
+        ]
 
 
 def get_act_plugin() -> ACTPlugin:
     return ResearchPaperReader()
 ```
 
-### Step 2: 写 ACT yaml + 扩展指南
+### Step 2: 写 ACT 主文件（YAML frontmatter + 扩展指南二合一）
 
-`my_research_pack/acts/research_paper/__act__.yaml`：
+`my_research_pack/acts/research_paper/ext_research_paper.md`：
 
-```yaml
+````markdown
+---
 name: research_paper
 display_name: 科研论文阅读
 description: |
@@ -166,9 +188,15 @@ tools:
   - read_file
   - read_document
   - search_files
-  - ai_search        # 联网搜索；如需"链式思考"请直接用 ReACT 引擎天然能力
+  - ai_search
 priority: 10
-```
+---
+
+# 科研论文阅读 ACT — 扩展指南
+（ACT 主体内容紧接 frontmatter，agent 会读全文）
+````
+
+如果倾向把 yaml 与 markdown 分开（兼容 monorepo `__act__.yaml` 风格），把 `get_act_file_path()` 仍指向 `ext_research_paper.md`，并在 `acts/research_paper/__act__.yaml` 单独维护 frontmatter（SDK 加载时优先读 `ext_*.md` 主体；frontmatter 缺失 fail-loud）。
 
 `my_research_pack/acts/research_paper/extended.md`（自然语言扩展指南，agent 会读）：
 
@@ -227,38 +255,43 @@ Tool Plugin 是给 agent 加新工具. 比如你要让 agent 调你公司的 CAD
 
 ### 最小可跑示例
 
+> **协议 SSOT**：`krow_agent_sdk.protocols.ToolPlugin` —— 只需 `plugin_id` (property) + `get_tools() -> list[ToolSpec]`。每个 `ToolSpec` 必含 `name / description / input_schema / handler`，可选 `category / direct_output / user_visible / output_schema / complexity / dependencies`。**不再分 `get_tool_definitions / execute_tool` 两步**——`handler` 是 Callable，ToolManager 调用工具时直接调它。
+
 ```python
 # my_cad_pack/__init__.py
 from typing import Any
 from krow_agent_sdk.protocols import ToolPlugin
 
 
+def _cad_query_part(part_id: str) -> dict:
+    """工具 handler：参数走 keyword-only；返回值会作为工具输出回到 agent。"""
+    # 这里调你公司真实 CAD API
+    return {
+        "part_id": part_id,
+        "name": "Bracket-2026-A1",
+        "weight_kg": 0.42,
+        "material": "AL-6061-T6",
+    }
+
+
 class CADQueryPlugin:
     plugin_id = "acme.cad_query"
-    
-    def get_tool_definitions(self) -> list[dict]:
+
+    def get_tools(self) -> list[dict]:
         return [{
-            "name": "cad_query_part",
-            "description": "查询 CAD 系统里某个零件的元数据",
-            "parameters": {
+            "name": "acme_cad_query_part",  # 推荐前缀 "<plugin_name>_" 防撞 native
+            "description": "查询 CAD 系统里某个零件的元数据。",
+            "input_schema": {
                 "type": "object",
                 "properties": {
                     "part_id": {"type": "string", "description": "零件 ID"},
                 },
                 "required": ["part_id"],
             },
+            "handler": _cad_query_part,        # ← 直接 Callable
+            "category": "custom",
+            "user_visible": True,
         }]
-    
-    def execute_tool(self, tool_name: str, args: dict) -> Any:
-        if tool_name == "cad_query_part":
-            # 这里调你公司真实 CAD API
-            return {
-                "part_id": args["part_id"],
-                "name": "Bracket-2026-A1",
-                "weight_kg": 0.42,
-                "material": "AL-6061-T6",
-            }
-        raise ValueError(f"未知 tool: {tool_name}")
 
 
 def get_tool_plugin() -> ToolPlugin:
@@ -284,8 +317,8 @@ result = agent.run("查询零件 P-1234 的材料和重量")
 | `GatePlugin` | 给 agent 加输出守门（"工业图纸 BOM 必须含 material 字段"）| [`quickstart.md`](./quickstart.md) §4.3 |
 | `EventListenerPlugin` | 监听 agent 内部事件（debug / 监控）| [`quickstart.md`](./quickstart.md) §4.4 |
 | `ObservabilityPlugin` | 接入你的 Datadog / Prometheus | [`quickstart.md`](./quickstart.md) §4.5 |
-| `MCPServerPlugin` | 接入 MCP 协议（远程工具）| `advanced-development-guide.md` |
-| `VisualAdapter` | 视觉 QA（图纸 / 报告 layout 校验）| `advanced-development-guide.md` |
+| `MCPServerPlugin` | 接入 MCP 协议（远程工具）| [`api-reference.md`](./api-reference.md) §5.7 + [`quickstart.md`](./quickstart.md) §4 |
+| `VisualAdapter` | 视觉 QA（图纸 / 报告 layout 校验）| [`api-reference.md`](./api-reference.md) §5.10 + [`quickstart.md`](./quickstart.md) §7.1 |
 
 ### 今日交付
 
@@ -377,7 +410,7 @@ jobs:
 
 ### 完整 record/replay 文档
 
-[`quickstart.md`](./quickstart.md) §5.5 + `advanced-development-guide.md`.
+[`quickstart.md`](./quickstart.md) §5.5 + [`api-reference.md`](./api-reference.md) §7（含 `LLMReplayStore` 全部 mode / API 表 + `wrap_provider_manager_with_replay` 手动 wrap 路径）。
 
 ### 今日交付
 
@@ -397,26 +430,26 @@ jobs:
 - **自定义 Hint**：给 agent 加领域专家直觉降低 LLM 调用次数
 - **自动 adapt / replan**：当 agent 卡住时让它换思路（不用你写 if/else）
 
-→ `advanced-development-guide.md` + §5.3
+→ [`advanced-development-guide.md`](./advanced-development-guide.md) §6 测试 + §7 进阶基础设施 + [`api-reference.md`](./api-reference.md) §4.2 BudgetSpec / §5.3 HintPlugin
 
 ### 路径 B：视觉 QA（工业 / 科研团队特别有用）
 
 - **VisualAdapter**：把 agent 输出（CAD 图 / 论文 layout / 流程图）丢给视觉模型做合规校验
 - **verify_fix 协议**：视觉模型发现问题 → agent 自动修
 
-→ `advanced-development-guide.md` + Step 2 P2 (PR #239)
+→ [`api-reference.md`](./api-reference.md) §5.10 + [`quickstart.md`](./quickstart.md) §4.5 / §7.1
 
 ### 路径 C：数据层接入
 
 - **DomainPackPlugin**：自定义实体抽取规则（科研：抽 author / venue / dataset；工业：抽 part / supplier / certification）
 - **wiki_compiler**：让 agent 把多文档抽出的 evidence 自动汇总成 wiki
 
-→ `advanced-development-guide.md` + §5.11
+→ [`api-reference.md`](./api-reference.md) §5.9 DomainPackPlugin + §11 数据 facade
 
 ### 路径 D：MCP 协议（接入第三方 MCP server）
 
 - 你公司有 MCP server？用 `MCPServerPlugin` form-A/B/C 三种形态接入
-- 完整范例 → `advanced-development-guide.md`
+- 完整范例 → [`api-reference.md`](./api-reference.md) §5.7 + [`quickstart.md`](./quickstart.md) §4 (MCP 三形态简表)
 
 ---
 
@@ -456,7 +489,7 @@ jobs:
 | 场景 | 联系方式 | 期望响应时间 |
 |---|---|---|
 | 装机 / API key 问题 | [support@krow.cn](mailto:support@krow.cn) | 24h |
-| 文档错误 / 改进建议 | [GitHub issue](https://github.com/aullik5/krow-sdk-docs/issues) | 1-3 天 |
+| 文档错误 / 改进建议 | [GitHub issue](https://github.com/aullik5/krow/issues) | 1-3 天 |
 | Plugin 设计咨询 | DevRel slack（邀请邮件附 invite） | 实时 |
 | 商务合同 / 大客户接入 | [support@krow.cn](mailto:support@krow.cn) cc [business@krow.cn](mailto:business@krow.cn) | 48h |
 | 紧急生产事故 | DevRel slack #incident channel | 实时 |
@@ -467,14 +500,12 @@ jobs:
 
 | 资源 | 用途 |
 |---|---|
-| [`README.md`](./README.md) | 文档地图 + 故障排查索引（必读）|
 | [`quickstart.md`](./quickstart.md) | 5 分钟跑通；含 5 类 plugin 范例 |
-| `advanced-development-guide.md` | 协议层 SSOT；写 plugin 必看 |
-| [`runtime-install.md`](./runtime-install.md) | runtime wheel 装机详细步骤 |
-| `source-protection-design.md` (internal) | 给架构师；插件作者可跳过 |
+| [`api-reference.md`](./api-reference.md) | 完整 API 手册（15 章 / 57 子节）— 写 plugin 必看 |
+| [`advanced-development-guide.md`](./advanced-development-guide.md) | TURBO 哲学 / 工具设计 / 测试方法论 |
+| [`runtime-install.md`](./runtime-install.md) | runtime wheel 装机详细步骤（v2 reverse proxy）|
 | [`roadmap.md`](./roadmap.md) | SDK 进度 SSOT |
-| `tests/sdk/examples/` | 真实可跑的 plugin 范例代码 |
-| `AGENTS.md` | Krow 主仓元规则（如果你要 PR 改主仓）|
+| [`EULA.md`](./EULA.md) | 商用条款（v1.1 DRAFT）|
 
 ---
 
@@ -490,4 +521,4 @@ jobs:
 
 欢迎入坑！
 
-— Krow Team · 2026-05-15
+— Krow Team · 2026-05-16（配套 `0.8.12.5` PyPI release + cloud-team 协议锁定）

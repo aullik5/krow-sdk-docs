@@ -2029,7 +2029,7 @@ RuntimeError
      然后调 .with_krow_api_key('sk-user-xxxxx').build()
   2) 设环境变量 KROW_API_KEY=sk-user-xxxxx，
      然后用 AgentBuilder.from_env().build()
-  3) 见 docs/sdk/plugin-architecture-design.md §3.2
+  3) 见 docs/sdk/api-reference.md §1 + advanced-development-guide.md §6.1
 ```
 
 > 详细黄金模板设计原则见 [`advanced-development-guide.md` §3.5 工具错误信息](./advanced-development-guide.md)。

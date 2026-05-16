@@ -611,16 +611,22 @@ class PrometheusObservability(ObservabilityPlugin):
 ## §6 关键基础设施速查（公开 SDK 暴露的接口）
 
 > 本节只列**公开 SDK 暴露给外部 plugin 用的 API**。私有 runtime 实现细节不在本文档范围。
+> 完整 API 手册（带签名 + 例子）见 [`api-reference.md`](./api-reference.md)。
 
 ### 6.1 Agent 入口
 
 ```python
 from krow_agent_sdk import (
-    AgentBuilder,        # 链式 builder 构造 Agent
-    Agent,               # 主入口
-    StreamItem,          # run_stream() 返回的 envelope
-    RunResult,           # run() 返回的结果
+    AgentBuilder,           # 链式 builder 构造 Agent
+    Agent,                  # 主入口（不直接 new；通过 .build() 拿到）
+    BudgetSpec,             # 预算配置 dataclass
+    BuilderConfig,          # builder 内部状态 dataclass
+    HttpGatewaySpec,        # HTTP gateway 配置（opt-in）
+    StreamItem,             # run_stream() 返回的 envelope
+    StreamItemKind,         # Literal["event", "result", "error"]
+    EventBusReader,         # 给 plugin 看的只读 EventBus 视图
 )
+# AgentV3Result 不在 SDK 顶层 export；通过 result = agent.run(...) 拿到
 ```
 
 | API | 用途 |
@@ -628,130 +634,203 @@ from krow_agent_sdk import (
 | `AgentBuilder()` | 启动构造链 |
 | `.with_krow_api_key(key)` | 配 Krow API key |
 | `.with_project_root(path)` | 指定 agent 工作根目录 |
-| `.with_chat_model(name)` | 选 chat 模型（如 `"claude-4-sonnet"`） |
-| `.with_reasoning_model(name)` | 选 reasoning 模型 |
+| `.with_chat_model(name)` | 选 chat 模型（如 `"qwen3.6-plus"`） |
+| `.with_reasoning_model(name)` | 选 reasoning 模型（如 `"deepseek-reasoner"`） |
 | `.with_vision_model(name)` | 选视觉理解模型 |
 | `.with_image_gen_model(name)` | 选图像生成模型 |
-| `.with_tool_plugin(plugin)` | 注册你的 ToolPlugin |
-| `.with_act_plugin(plugin)` | 注册你的 ACTPlugin |
-| `.with_hint_plugin(plugin)` | 注册你的 HintPlugin |
-| `.with_gate_plugin(plugin)` | 注册你的 GatePlugin |
-| `.with_event_listener(plugin)` | 注册 EventListenerPlugin |
-| `.with_observability(plugin)` | 注册 ObservabilityPlugin |
-| `.with_disabled_tools([...])` | 物理禁用某些工具（System 1 闸住） |
+| `.with_image_edit_model(name)` | 选图像编辑模型 |
+| `.with_text_encoder_model(name)` | 选 embedding 模型 |
+| `.with_tool_plugin(plugin)` | 注册 ToolPlugin |
+| `.with_act_plugin(plugin)` | 注册 ACTPlugin |
+| `.with_hint_plugin(plugin)` | 注册 HintPlugin |
+| `.with_gate_plugin(plugin)` | 注册 GatePlugin |
+| `.with_event_listener_plugin(plugin)` | 注册 EventListenerPlugin |
+| `.with_observability_plugin(plugin)` | 注册 ObservabilityPlugin |
+| `.with_mcp_server_plugin(plugin)` | 注册 MCPServerPlugin（experimental，需 `KROW_ENABLE_MCP_SERVER_PLUGIN=1`）|
+| `.with_security_plugin(plugin)` | 注册 SecurityPlugin（experimental）|
+| `.with_domain_pack_plugin(plugin)` | 注册 DomainPackPlugin（experimental）|
+| `.with_visual_adapter(ext, cls)` | 注册 VisualAdapter（按文件扩展名）|
+| `.with_visual_adapter_plugin(plugin)` | 注册 VisualAdapterPlugin（批量）|
+| `.with_default_pptx_adapter()` | 一行打开 PPTX 视觉质检 |
 | `.with_replay_store(store)` | 走 record/replay 测试模式 |
-| `.build()` | 构造 Agent |
+| `.with_budget(BudgetSpec(...))` | 自定义预算 |
+| `.with_http_gateway(HttpGatewaySpec(...))` | opt-in HTTP gateway |
+| `.with_*_plugins_from_entry_points()` | opt-in 扫 entry_points 自动注册（需 `KROW_ENABLE_PLUGIN_ENTRY_POINTS=1`） |
+| `.build(validate_connection=True)` | 构造 Agent（自动凭证注入 + cloud 模型 fallback） |
 
 ```python
-# 阻塞式
-result: RunResult = agent.run(user_input)
+# 阻塞式（返回 AgentV3Result，不是 RunResult）
+result = agent.run(user_input)
+# result.success / result.solution / result.execution_result / result.final_output
 
-# 流式（用户可中断）
+# 流式（用户可中断；详 quickstart §2 流式输出）
 for item in agent.run_stream(user_input):
     if item.kind == "event":
-        print(item.event.name, item.event.data)
+        # event 是 modules.events.bus_core.Event dataclass
+        print(item.event.type, item.event.payload)
     elif item.kind == "result":
         print("Done:", item.result.final_output)
     elif item.kind == "error":
-        print("Error:", item.error)
+        raise item.error  # 后台异常
 ```
 
-### 6.2 LLM Provider（写 plugin 时一般不用，但写 LLM-driven 工具时会用到）
+### 6.2 LLM helper（在 LLM-driven Tool 中按需用，注意 §1.4 反模式 C）
 
 ```python
-from krow_agent_sdk.llm import (
-    ChatMessage,
-    LLMProvider,
-)
-
-# 写 LLM 驱动的 tool 时（注意 §1.4 反模式 C：System 1 工具内禁止）
-provider = ctx.get_llm_provider("reasoning")
-messages = [
-    ChatMessage(role="system", content="..."),
-    ChatMessage(role="user", content="..."),
-]
-response: str = provider.generate(messages)
+from krow_agent_sdk.llm import build_chat_message, build_chat_messages
+# build_chat_message(role, content) -> dict
+# build_chat_messages(system, user) -> list[dict]
 ```
 
-**入参**：必须是 `List[ChatMessage]`（不是 prompt 字符串）。
+> ⚠️ **TURBO 边界**：System 1 工具内**禁止**调 LLM。LLM-driven 工具的合理形态是把工具上层"ACT-内 ReACT 循环"作为驱动方，工具本身仍是 deterministic helper。详 §1.4 反模式 C。
 
-### 6.3 EventBus
+### 6.3 EventBus（只读视图）
+
+`EventBusReader` 是 SDK 给 plugin 提供的只读视图（不能 publish），通过 `agent.event_bus` 访问：
 
 ```python
-from krow_agent_sdk import EventBus, EventBusReader
+from krow_agent_sdk import EventBusReader
 
-bus: EventBus = ctx.event_bus       # 在 plugin 内注入
-reader: EventBusReader = bus.subscribe(topics=["llm.*", "executor.step.*"])
+reader: EventBusReader = agent.event_bus  # 只读 EventBusReader（不是 EventBus）
 
-for event in reader.iter():
-    print(event.name, event.data)
+def on_step(event):
+    # event 是 modules.events.bus_core.Event dataclass：type / payload / trace_id / timestamp
+    print(event.type, event.payload)
+
+token = reader.subscribe("progressive.step_completed", on_step, track_recent=True)
+# ...
+reader.unsubscribe(token)
+
+# 也支持 ring buffer 回看（仅 track_recent=True 的 topic）：
+for ev in reader.iter_recent("progressive.step_completed", n=10):
+    print(ev.type, ev.payload)
 ```
+
+> Plugin 想"发"事件 → 走 P5 EventListenerPlugin 的 listener 副作用 / P6 ObservabilityPlugin 自己的 sink，**不**通过 SDK 反向 publish（保单向 pub-sub）。
 
 ### 6.4 Replay Store（测试一等公民）
 
 ```python
 from krow_agent_sdk.replay import LLMReplayStore
 
-store = LLMReplayStore.load("./fixtures/my_test.jsonl")
+# 推荐：从环境变量决定 mode（CI replay / 本地 record / auto）
+store = LLMReplayStore.from_env(
+    "tests/fixtures/my_test.json",      # fixture 路径
+    mode_env="KROW_LLM_REPLAY_MODE",    # 默认值
+    default="replay",
+)
+
+# 或显式指定
+from pathlib import Path
+store = LLMReplayStore(Path("fixtures/x.json"), mode="replay")
+
 agent = (
     AgentBuilder()
-    .with_replay_store(store)            # 不调真实 LLM，从 store 取
+    .with_replay_store(store)            # SDK 自动 wrap 所有 LLM provider
     .build()
 )
 ```
 
 **特点**：
 
-- 0 token 成本
-- 完全确定性可重放
-- CI 可跑
+- 0 token 成本（replay 模式）
+- 完全确定性可重放（key = request hash）
+- CI 可跑（`KROW_LLM_REPLAY_MODE=replay`，cache miss 抛 `LLMReplayMiss`）
+- mode：`record` / `replay`（默认）/ `auto`
 
-### 6.5 Plugin 上下文 (`PluginContext`)
+### 6.5 Plugin 接口（**实例属性 / 协议方法**，不是 ctx 注入）
+
+> SDK 走 **Protocol**（duck typing） + 实例属性的扁平形态，**没有** PluginContext / ToolContext 注入。`plugin_id` 是 property / class attr，工具 handler 直接是 `Callable`。
 
 ```python
-class MyToolPlugin(ToolPlugin):
-    def get_tools(self, ctx: PluginContext) -> List[Tool]:
-        # ctx.event_bus    : EventBus
-        # ctx.config       : PluginConfig (你声明的)
-        # ctx.workspace    : Path（agent project_root）
-        # ctx.api_key      : str（Krow API key，**不要**透传给第三方）
-        # ctx.get_llm_provider(category) : LLMProvider
+from krow_agent_sdk.protocols import ToolPlugin, ACTPlugin
+
+# ToolPlugin: plugin_id (property) + get_tools() -> list[ToolSpec]
+class MyToolPlugin:
+    plugin_id = "acme.search"   # 双段 "<org>.<plugin_name>"
+
+    def get_tools(self) -> list[dict]:
+        return [{
+            "name": "acme_search",
+            "description": "搜某个数据库",
+            "input_schema": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+            "handler": _do_search,    # Callable[..., Any]
+        }]
+
+def _do_search(query: str) -> dict:
+    if not query.strip():
+        return {"ok": False, "error": "❌ query 不能为空。"}
+    return {"ok": True, "results": [...]}
+
+
+# ACTPlugin: plugin_id + act_name (property) + get_act_root() + get_act_file_path() + get_tool_names()
+# 详 quickstart.md §3 + api-reference.md §5.1
+```
+
+### 6.6 Lifecycle hooks（可选）
+
+```python
+from krow_agent_sdk import BasePluginLifecycle, SDKContext
+
+class MyPlugin(BasePluginLifecycle):
+    plugin_id = "acme.example"
+
+    def on_load(self, ctx: SDKContext) -> None:
+        # ctx.api_key  : str
+        # ctx.workspace: Path
+        # ctx.event_bus: EventBusReader  (只读，不能 publish)
+        ...
+
+    def on_unload(self) -> None:
         ...
 ```
 
-### 6.6 Tool 基类
+`BasePluginLifecycle` 是**可选** mixin —— Protocol 本身不要求 lifecycle 方法。`on_load` 异常 → fail-loud；`on_unload` 异常 → log warning 不阻塞。
 
-```python
-from krow_agent_sdk import Tool
+### 6.7 Plugin entry_points（**opt-in**，默认关）
 
-class MyTool(Tool):
-    name = "my_search"
-    description = "搜某个数据库；用法：my_search(query, top_k=10)"
-
-    def execute(self, ctx: ToolContext, **kwargs) -> Dict[str, Any]:
-        query = kwargs.get("query", "").strip()
-        if not query:
-            return {"ok": False, "error": "❌ query 不能为空。修法：传非空字符串。"}
-        # ...
-        return {"ok": True, "results": [...]}
-```
-
-### 6.7 Plugin entry_points（自动发现）
-
-在你的 `pyproject.toml` 内：
+在你的 `pyproject.toml` 内（一个 plugin 一个 group）：
 
 ```toml
-[project.entry-points."krow.plugin"]
-my_research = "my_pkg.plugin:MyResearchPlugin"
+[project.entry-points."krow.act_plugin"]
+my_research = "my_pkg.plugin:get_act_plugin"
+
+[project.entry-points."krow.tool_plugin"]
+my_cad = "my_pkg.cad:CADQueryPlugin"
 ```
 
-`AgentBuilder` 默认会扫描所有 `krow.plugin` group → 自动注册。
-
-如果要禁用：
+主进程**默认不**自动扫描；用户必须 opt-in：
 
 ```python
-agent = AgentBuilder().without_auto_discover_plugins().build()
+import os
+os.environ["KROW_ENABLE_PLUGIN_ENTRY_POINTS"] = "1"
+
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(key)
+    .with_all_plugins_from_entry_points()  # 扫 9 个 group
+    .build()
+)
 ```
+
+或按类型粒度扫：
+
+```python
+.with_act_plugins_from_entry_points()
+.with_tool_plugins_from_entry_points()
+.with_hint_plugins_from_entry_points()
+.with_gate_plugins_from_entry_points()
+.with_event_listener_plugins_from_entry_points()
+.with_observability_plugins_from_entry_points()
+.with_domain_pack_plugins_from_entry_points()
+.with_visual_adapter_plugins_from_entry_points()
+```
+
+> **安全**：默认关闭防 supply-chain（恶意 wheel install 自动注入 plugin）。打开 entry_points 自动扫描 = 信任 PyPI 上所有装的 wheel；生产建议保持显式 `.with_<type>_plugin(...)`。
 
 ---
 
@@ -800,38 +879,62 @@ def test_my_tool_normalizes_path_list():
 
 ### 7.3 写 Replay 测试
 
-**录制阶段**（一次性）：
+> **真实 API**：`LLMReplayStore` 的 mode 由 `KROW_LLM_REPLAY_MODE` env 或构造参数决定；`record` 模式下每次 LLM 调用自动 `put` 到 fixture，无需手动 `save()`。
+
+**录制阶段**（本地一次性，跑前 `set KROW_LLM_REPLAY_MODE=record`）：
 
 ```python
+import os
+from pathlib import Path
+from krow_agent_sdk import AgentBuilder
 from krow_agent_sdk.replay import LLMReplayStore
 
-store = LLMReplayStore(mode="record")
+os.environ["KROW_LLM_REPLAY_MODE"] = "record"  # 本地 record；CI 默认 replay
+store = LLMReplayStore.from_env("./fixtures/my_test.json")
 agent = (
     AgentBuilder()
-    .with_krow_api_key(KEY)
-    .with_replay_store(store)            # record mode
+    .with_krow_api_key(os.environ["KROW_API_KEY"])
+    .with_project_root("./workspace")
+    .with_replay_store(store)            # SDK 自动 wrap LLM provider
     .build()
 )
-
-result = agent.run("我的测试 user input")
-store.save("./fixtures/my_test.jsonl")
+try:
+    result = agent.run("我的测试 user input")
+    assert result.success
+finally:
+    agent.shutdown()  # 自动 uninstall replay swap，并 persist fixture
 ```
 
 **回放阶段**（CI 每次跑）：
 
 ```python
+import pytest
+from krow_agent_sdk import AgentBuilder
+from krow_agent_sdk.replay import LLMReplayStore
+
+
 def test_my_journey_replay():
-    store = LLMReplayStore.load("./fixtures/my_test.jsonl")
+    # CI 默认 replay；fixture 必须已被 record 阶段提交到仓
+    store = LLMReplayStore.from_env(
+        "./fixtures/my_test.json",
+        default="replay",
+    )
     agent = (
         AgentBuilder()
-        .with_krow_api_key("dummy-key-for-replay")
-        .with_replay_store(store)        # replay mode
+        .with_krow_api_key("sk-user-fake-for-replay-mode-only")
+        .with_project_root("./workspace")
+        .with_replay_store(store)
         .build()
     )
-    result = agent.run("我的测试 user input")
-    assert result.success
-    assert "expected_output_substring" in result.final_output
+    try:
+        result = agent.run("我的测试 user input")
+        assert result.success
+        assert "expected_output_substring" in result.final_output
+    finally:
+        agent.shutdown()
 ```
+
+**cache miss 行为**：默认 `on_miss="raise"` → 撞 cache miss 抛 `LLMReplayMiss`，提示需要重 record，避免悄悄烧钱。
 
 ### 7.4 写 E2E 真实 LLM 测试
 

@@ -2,8 +2,11 @@
 
 > 本教程让你在 5 分钟内用 Krow Agent SDK 跑一个真实 LLM hello-world，不需要桌面 app、不需要修改 krow 主仓代码。
 >
-> 进阶最佳实践：[`advanced-development-guide.md`](./advanced-development-guide.md)（TURBO 哲学 + 工具设计 + ACT 编写 + 测试）。
-> 适用版本：krow main（含 PR #211 `build()` 自动凭证注入 + cloud 模型 fallback）及之后。
+> **进阶资料**：
+> - [`api-reference.md`](./api-reference.md) — 完整 API 手册（15 章 / 57 子节）
+> - [`advanced-development-guide.md`](./advanced-development-guide.md) — TURBO 哲学 / 工具设计 / 测试方法论
+>
+> **适用版本**：`krow-agent-sdk >= 0.8.12.5`（`build()` 自动凭证注入 + cloud 模型 fallback + 6 个 `with_<cat>_model` API）。
 
 ---
 
@@ -20,23 +23,40 @@
 
 ## 1. 安装（30 秒）
 
-> **当前发布状态**（2026-05-15）：✅ **`krow-agent-sdk==0.8.12.4` 已发 PyPI 主站**：
+> **当前发布状态**（2026-05-16）：✅ **`krow-agent-sdk==0.8.12.5` 已发 PyPI 主站**：
 > ```bash
 > pip install krow-agent-sdk
 > ```
 > EULA 当前为 v1.1 DRAFT（含 good-faith 披露），等真律师签字后转 EFFECTIVE
 > （详 [`roadmap.md`](./roadmap.md) Step 2 P2）。
-> **runtime wheel** 仍处于 M9 设计 ✅ / 上线 🚧 状态（不影响写 plugin + record/replay 测试）。
+> **runtime wheel** 处于 M9 v2 reverse-proxy **W1-W4 实施中**（2026-05-16 与 Cloud team 协议锁定）；
+> 详见 [`runtime-install.md`](./runtime-install.md)。不影响写 plugin + record/replay 测试。
 >
-> 下文保留 monorepo / dev wheel 两种入门路径，**仅 Krow team collaborator 可用**；
-> 外部开发者请直接用 `pip install krow-agent-sdk`。
+> 下文 §1.1-§1.2 是 **Krow team collaborator** 的开发模式入门（monorepo / dev wheel）；
+> 外部开发者请直接用 §1.0 的 `pip install krow-agent-sdk`。
 
-### 1.1 推荐：克隆 krow 主仓 + 装 SDK extras
+### 1.0 外部开发者一行装机（推荐）
 
 ```bash
-# (内部 monorepo 私有；外部开发者请用 `pip install krow-agent-sdk`)
-# # (内部 monorepo 私有；外部开发者请用 `pip install krow-agent-sdk`)
-# git clone https://github.com/aullik5/krow.git
+pip install krow-agent-sdk                 # 13 项必需依赖
+pip install "krow-agent-sdk[office]"       # +24 项 docx/pptx/excel/pdf
+pip install "krow-agent-sdk[visual]"       # +4 项 cairosvg/cairocffi（PPTX 视觉质检，需系统库 libcairo2 + libpango，详 §4.5.1）
+pip install "krow-agent-sdk[knowledge]"    # +4 项 networkx/jieba
+pip install "krow-agent-sdk[remote]"       # +8 项 fastapi/uvicorn/websockets
+pip install "krow-agent-sdk[all]"          # 一站式全装
+```
+
+**最小 import 验证**：
+
+```bash
+python -c "from krow_agent_sdk import AgentBuilder; print('SDK OK')"
+# SDK OK
+```
+
+### 1.1 Collaborator 模式：克隆 krow 主仓 + 装 SDK extras
+
+```bash
+git clone https://github.com/aullik5/krow.git
 cd krow
 python -m venv .venv
 .venv\Scripts\activate           # Windows
@@ -71,47 +91,15 @@ python -c "from krow_agent_sdk import AgentBuilder; print('SDK OK')"
 ### 1.2 远程一行安装（git+pip）
 
 ```bash
-# (monorepo 私有；外部开发者用：pip install krow-agent-sdk)
-# # (monorepo 私有；外部开发者用：pip install krow-agent-sdk)
-# pip install -e "git+https://github.com/aullik5/krow.git@main#egg=krow[sdk]"  # 仅 Krow team collaborator  # 仅 Krow team collaborator
+pip install -e "git+https://github.com/aullik5/krow.git@main#egg=krow[sdk]"
 ```
 
-### 1.3 Step 2 PyPI 路线（M1-M4 工程实施已完成，待 release 工程师配 OIDC 后即可发布）
-
-```bash
-# 首次 PyPI 发布后用户可一行装机
-pip install krow-agent-sdk              # 13 项必需依赖（design §3.1）
-pip install "krow-agent-sdk[office]"    # +24 项 docx/pptx/excel/pdf
-pip install "krow-agent-sdk[visual]"    # +4 项 cairosvg/cairocffi（PPTX 视觉质检，需系统库 libcairo2 + libpango，详 §3.5）
-pip install "krow-agent-sdk[knowledge]" # +4 项 networkx/jieba
-pip install "krow-agent-sdk[remote]"    # +8 项 fastapi/uvicorn/websockets
-pip install "krow-agent-sdk[all]"       # 一站式全装
-```
-
-**Release 工程师首次发布前的 setup**（一次性配置）：
-
-1. 阅读 `docs/sdk/pypi-publish-setup.md` (internal)
-2. 在 TestPyPI / PyPI 注册 trusted publisher（OIDC）
-3. GitHub repo 创建 `testpypi` / `pypi` environments
-4. 给 `pypi` environment 加 manual approval reviewer
-
-**首次发布**：`git tag sdk-v0.8.12 && git push origin sdk-v0.8.12` → `sdk-publish.yml` 自动跑 TestPyPI → admin approve → 正式 PyPI。
-
-**完整设计**：`docs/sdk/pypi-subpackage-design.md`（4 阶段迁移路线 / 风险矩阵 / 决策记录）。
-
-**当前实施状态**（2026-05-13）：
-
-- **M1 ✅** PR #234 — 子包骨架 + symlink + hatchling
-- **M2 ✅** PR #235 — 依赖收敛 13 + 4 extras
-- **M3 ✅** PR #236 — dual-build CI + nightly + SBOM
-- **M4 ✅** PR #237 — OIDC trusted publisher + dry-run + setup 文档
-
-### 1.4 Headless Docker 镜像里用 SDK（生产部署）
+### 1.2 Headless Docker 镜像里用 SDK（生产部署）
 
 `deploy/Dockerfile.headless` 默认装 `pip install ".[headless,sdk]"` —— 镜像同时是 krow service runtime + SDK runtime。外部团队部署 plugin 项目可直接 `FROM krow-headless` 拿到 `krow_agent_sdk` 顶级包，无需自己装依赖：
 
 ```dockerfile
-FROM ghcr.io/aullik5/krow-headless:latest  # (私有镜像；外部团队请走 docker build 自建)  # (私有镜像；外部团队请走 docker build 自建)
+FROM ghcr.io/aullik5/krow-headless:latest
 COPY my_plugins/ /workspace/my_plugins/
 ENV KROW_API_KEY=sk-user-...
 # headless service 入口或自定义启动器都可以
@@ -328,7 +316,7 @@ agent = (
 )
 ```
 
-`AgentBuilder` 还支持加自定义 `Tool` / `Hint` / `Gate` / `EventListener` / `Observability` plugin —— 详 `advanced-development-guide.md`。
+`AgentBuilder` 还支持加自定义 `Tool` / `Hint` / `Gate` / `EventListener` / `Observability` / `MCPServer` / `Security` / `DomainPack` / `VisualAdapter` plugin —— 完整 10 类 plugin protocol 详 [`api-reference.md`](./api-reference.md) §5；进阶最佳实践详 [`advanced-development-guide.md`](./advanced-development-guide.md) §3-§5。
 
 ---
 
@@ -635,8 +623,8 @@ finally:
 完成 hello world 后：
 
 1. **业务上**：把第 3 节的 ACT 模板改成你领域的（工业设计 / 法律 / 教研 ...）
-2. **架构上**：读 `advanced-development-guide.md` 的 6 类 mvp_critical plugin protocol（ACT / Tool / Hint / Gate / EventListener / Observability）+ 3 类 experimental（MCPServer / Security / DomainPack）；§5 的 read-only data facade；§6 的 entry_points 自动发现协议
-3. **测试上**：用 `from krow_test_sdk import HeadlessAgentHarness` 写 plugin 单元测试 + replay LLM E2E（仅 monorepo / 含 tests 的安装可用，wheel 用户用 LLMReplayStore + AgentBuilder）；UI 类 e2e 走 `tests/e2e_framework/` 的 `WorkbenchHarness`（依赖 PySide6，仅 monorepo 内可用）
+2. **架构上**：读 [`api-reference.md`](./api-reference.md) §5 的 10 类 plugin protocol（6 stable + 4 experimental）；[`advanced-development-guide.md`](./advanced-development-guide.md) §1 TURBO 哲学 / §4 ACT 最佳实践 / §6 测试方法论
+3. **测试上**：用 `LLMReplayStore` + `AgentBuilder.with_replay_store()` 写 record / replay 单测（详 §5.5 + [`api-reference.md`](./api-reference.md) §7）；含 `tests/` 的 monorepo 安装可用 `from krow_agent_sdk.test_sdk import HeadlessAgentHarness`
 4. **生产上**：set `KROW_SDK_TELEMETRY=1` 帮 krow 团队改进 SDK；set `KROW_SDK_HTTP_GATEWAY=1` 让外部 UI 接入
 
 | Step | Wave | 状态 | 关键能力 |
@@ -775,9 +763,9 @@ cloud 当前可选清单 → `GET /v1/models`（按 capability 过滤；详 `mod
 - **lifecycle on_load 异常**会 fail-loud；on_unload 异常 log warning 不阻塞 shutdown
 - 主仓 ConcludeGuard 8 gates 任何一个判 FAIL → Agent 会 replan / re-conclude，**不会**让 plugin 错误污染 final output
 
-详 `advanced-development-guide.md`。
+详 [`advanced-development-guide.md`](./advanced-development-guide.md) §6（测试方法论 + 故障排查）。
 
 ---
 
-> 文档版本：v1.0（2026-05-13，配套 PR #211 + Step 1 完成验收）
+> 文档版本：v1.2（2026-05-16，配套 `0.8.12.5` PyPI release + cloud-team 协议锁定）
 > 维护：在 SDK 主版本变化时更新；外部开发者反馈的 FAQ 直接累积到第 8 节。

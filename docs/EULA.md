@@ -9,7 +9,7 @@
 > `[PENDING BUSINESS]` are placeholders awaiting external counsel sign-off
 > and business decisions respectively. Until v1.x reaches `EFFECTIVE`
 > status, this document is published as a **good-faith disclosure** of
-> intended terms. See `eula-mock-legal-review-feedback.md` (internal)
+> intended terms. See [`eula-mock-legal-review-feedback.md`](./eula-mock-legal-review-feedback.md)
 > for the full review log and rationale behind v1.0 → v1.1 changes.
 
 ---
@@ -451,7 +451,7 @@ disclosure (C.3) — is intended to satisfy:
 **Final selection** between the three layers (whether all three are
 mandatory or only C.1 + C.3 baseline) is **[PENDING BUSINESS DECISION
 + external counsel sign-off]**. Implementation roadmap: see
-`eula-legal-review-checklist.md` (internal) §6.
+[`eula-legal-review-checklist.md`](./eula-legal-review-checklist.md) §6.
 
 ---
 

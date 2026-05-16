@@ -25,28 +25,43 @@
 
 ---
 
-## Step 2 ✅ M1-M8 落地 / 🚧 M9 上线工作中 / ✅ 商业发布起步（2026-05-15）
+## Step 2 ✅ M1-M8 + M10-M11 落地 / 🚀 M9 W1-W4 实施 / ✅ 商业发布稳定迭代（2026-05-16）
 
 **工程层面**：
 - M1-M4（PyPI 子包 + OIDC publish）✅ 完成
 - M5-M7（dual-build + nightly + SBOM + headless-bridge）✅ 完成
-- M8（Cython spike + sdk-runtime build workflow）✅ 完成
-- **M9（sdk-runtime 私有发布 + `krow-sdk-install` bridge）设计 ✅ / 上线 🚧**：
-  - 设计文档齐备（`runtime-install-bridge-design.md` + `source-protection-design.md`）
-  - **关键阻塞**：原设计走 GitHub Packages PyPI 端点，但 GH Packages **已停止支持 PyPI 类型**（2024 起 npm/Docker/Maven/NuGet/RubyGems 仍支持，PyPI 已 deprecated）→ v1 设计基础不可行
-  - **决策（2026-05-15）**：**v2 reverse proxy 模式提前到 v1 启用**（Krow Cloud 直接代理 wheel 字节流，客户感知不到外部 registry，最优雅但 cloud team 工作量 ~2 周）
-  - `packages/krow-sdk-install/` CLI 子包待建
-- M10-M11（watermark + telemetry）✅ 完成
-- Tier 1-5 死代码清理（excalidraw / ghost ACT / solution_*/he/local_refiner）✅ 完成
+- M8（Cython spike + `sdk-runtime-build.yml` 9-wheel matrix）✅ 完成（**注**：roadmap 历史版本误标 M9 为 ✅，实际未上线，详下）
+- **M9（sdk-runtime 私有发布 + `krow-sdk-install` bridge）设计 ✅ / 实施启动 🚀**：
+  - 设计文档齐备（`runtime-install-bridge-design.md` + `source-protection-design.md` + `cloud-runtime-proxy-spec.md` v1.0 + `cloud-team-response-ack.md`）
+  - **2026-05-15**：原设计走 GH Packages PyPI 已 deprecated → 决策切换到 v2 reverse proxy
+  - **2026-05-16 协议锁定**：Cloud team 答复（`cloud-team-response.md`）+ SDK team 确认（`cloud-team-response-ack.md`）→ **W1 启动**
+    - Storage：火山引擎 TOS（cn-shanghai，bucket `krow-sdk-runtime`，S3 兼容接口）
+    - Endpoint：`api.krow.cn/sdk/runtime/pypi/{simple,files}/...`（gateway 内 `sdk_runtime.rs` 模块；非独立 Service）
+    - 鉴权：Bearer + Basic（`__token__:<KROW_API_KEY>`）双支持
+    - 套餐 entitlement：Free 无 / Basic 10 次/天 / Pro 50 次/天 / Premium 无限
+    - SLA：M9 99.5% → M10+ 99.9%
+    - 计费：M9 暂不收费（套餐内含），预留 hook
+  - **W1**（2026-05-17 周）：Cloud bucket+IAM；SDK 提供 manifest sample（`cloud-runtime-manifest-sample.json` 已交付）+ 改 publish job 走 TOS（已交付）
+  - **W2**：Cloud staging + SDK 真实上传 IAM 联调
+  - **W3**：双方联调 + 验收清单 §8 全过 + `krow-sdk-install --base-url` staging
+  - **W4**：Cloud prod + 3-5 pilot 客户开放
+  - SDK 侧 `packages/krow-sdk-install/` CLI 子包待建（W3 Day 1 之前）
+- M10（watermark）✅ 完成
+- M11（telemetry）✅ 完成
+- Tier 1-5 死代码清理 ✅ 完成
 
 **商业发布层面**：
-- ✅ `krow-agent-sdk==0.8.12.4` 已正式发布 PyPI 主站（2026-05-15）
+- ✅ `krow-agent-sdk==0.8.12.3` 已发 PyPI 主站（2026-05-15）
+- ✅ `0.8.12.4` 已发（2026-05-15）：README + LICENSE 内私有仓链接修订
+- ✅ `0.8.12.5` 已发（2026-05-16）：`pyproject.toml [project.urls]` 修指公开文档仓 + 公开文档完善（advanced-development-guide / api-reference 上线）
 - 🚧 EULA v1.1 仍为 DRAFT（good-faith disclosure）；等真律师签字 → v1.x EFFECTIVE → 移除 disclosure
-- 🚧 M9 runtime 上线工作（v2 reverse proxy 实施）
+- 🚀 M9 runtime 上线工作（v2 reverse proxy 4 周 W1-W4 实施中 · 2026-05-16 协议锁定）
 
 **外部开发者实际可用度**：
 - ✅ `pip install krow-agent-sdk` + 写 plugin + record/replay 单元测试
-- ❌ `agent.run()` 真实跑（等 M9 上线）
+- 🚧 `agent.run()` 真实跑（等 M9 W4 上线，预计 2026-06）
+
+**公开文档仓**：[aullik5/krow-sdk-docs](https://github.com/aullik5/krow-sdk-docs)（2026-05-15 上线，**7 份**对外文档同步自 monorepo `docs/sdk/`：quickstart / external-developer-onboarding / runtime-install / advanced-development-guide / api-reference / roadmap / EULA）
 
 外部团队 PyPI 接入：`pip install krow-agent-sdk` 独立子包，不依赖 krow monorepo。
 
@@ -83,9 +98,14 @@
 - ✅ Step 2 P1（`with_default_model`→6 个 `with_<cat>_model`（chore/sdk-model-selection-api 2026-05-15）/ `with_replay_store` / `MCPServerPlugin` form-C）全部完成
 - ✅ Step 2 P1 `Agent.run_stream()` 流式 API（PR #316，2026-05-15）：`StreamItem` envelope + 同步生成器 + 20 unit tests + CI smoke 防回归
 - ✅ Step 2 P2 visual_inspect plugin 完整公开（PR #239，2026-05-13）
-- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详 `eula-mock-legal-review-feedback.md` (internal)
+- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详 [`eula-mock-legal-review-feedback.md`](./eula-mock-legal-review-feedback.md)
 - 🚧 Step 2 P2 EULA 后续阻塞：(a) 商务决策 3 项（governing law / liability floor / consent 机制 mandatory level）；(b) 持证律师签字（建议中国大陆 + 香港双 review，~14 天）；(c) Cloud 端 + CLI 端同意机制实施
 - 🚧 Step 2 P2 剩余：`domain pack ontology editor + custom entity 抽取`；视外部团队反馈优先度决定开工时机
 - ❌ Step 2 BYO LLM provider 已决策不做（见上表注释）
 
-**正式 PyPI 首发阻塞**：必须等 EULA EFFECTIVE（v1.x → v1.x+1，含真律师签字），预计 **2026-06-19 (T+35)** 可达成；详 `eula-legal-review-checklist.md` (internal) §6 时间线。
+**当前阻塞 / 后续节点**：
+
+- ✅ PyPI 主站已稳定迭代（`0.8.12.5` 已发）；EULA 仍处 v1.1 DRAFT（good-faith disclosure）
+- 🚧 EULA v1.x EFFECTIVE：等真律师签字（建议中国大陆 + 香港双 review，~14 天），预计 **2026-06-19 (T+35)** 可达成；签字后下版 hotfix 发布移除 disclosure
+- 🚀 M9 runtime W1-W4 上线节奏：W1 = 2026-05-17 周 / W4 = 2026-06，3-5 pilot 客户先行体验
+- ✅ 公开文档完整：quickstart / external-developer-onboarding / runtime-install / advanced-development-guide / api-reference / roadmap / EULA 7 份对外文档同步自 monorepo
