@@ -265,53 +265,52 @@ import，但 ``agent.run()`` 会报错，因为没有 runtime.
 
 ---
 
-## 8. 现在就申请 W3-W4 Pilot（**优先体验**）
+## 8. Public Beta 时间表（**任何 Krow Cloud 用户即可装**）
+
+**最新决策（2026-05-17）**：跳过封闭 Pilot 阶段，**直接公开**。
+任何 Krow Cloud 注册用户拿到 ``KROW_API_KEY`` 即可装 runtime — **无需邀请、无需审核**。
 
 **当前状态**：runtime 已与 Krow Cloud team 签 v2 协议（2026-05-16），W1 测试 wheel +
-W3 install CLI 子包 + 单测全部就绪。**W3 W2-W4** 期（2026-05-23 ~ 2026-06-06）将开放
-**5-10 名外部开发者**作为首批 pilot 用户。
+W3 install CLI 子包 + W4 真实 LLM E2E 测试已交付（[`roadmap.md`](./roadmap.md) M9 W1+W3+W4）。
+W2 staging gateway + IAM 凭据由 Cloud team 在 2026-05-23 周交付，W3 联调通过即开 Public Beta。
 
-### 8.1 你能拿到什么
+### 8.1 时间表
 
-- 🎟 **专属 pilot API key**（前缀 ``pk-pilot-``，免费 50 次/天 runtime 下载）
-- ⚡ **24h 内 Slack 应答**（专属 pilot 频道）
-- 🔧 **直连 Cloud team + SDK team owner**（联调期遇阻立即升级）
-- 🚀 **优先于 GA 一周尝鲜**（Public Beta = 2026-06-06；GA = 2026-06-15）
+| 日期 | 阶段 | 你需要做什么 |
+|---|---|---|
+| **2026-05-23 周** | W2：Cloud team 交付 staging gateway + IAM；SDK team 真实 cython 编译 + 上传 9 wheels 到 TOS | 等通知（关注 [aullik5/krow-sdk-docs](https://github.com/aullik5/krow-sdk-docs) `roadmap.md` 更新）|
+| **2026-05-30 周** | W3：staging 联调全过；切到 prod gateway | 同上 |
+| **2026-06-06** | **Public Beta 开放** — 所有持 ``KROW_API_KEY`` 的开发者直接装 | 跑 ``krow-sdk-install --api-key $KROW_API_KEY``（详 §3 上面）|
+| **2026-06-15** | GA — ``pip install krow-agent-sdk[runtime-installer]`` 一键 | 升级到 ``[runtime-installer]`` extras |
 
-### 8.2 申请条件
+### 8.2 套餐配额（Public Beta 期）
 
-发邮件到 [support@krow.cn](mailto:support@krow.cn?subject=Krow%20SDK%20Runtime%20Pilot%20Application)
-（主题：``Krow SDK Runtime Pilot Application``），含：
+| 套餐 | runtime 下载配额（次/天）| 说明 |
+|---|---|---|
+| Free | 0 | 不开放（仅公开 SDK + LLMReplayStore 体验）|
+| Basic | 10 | 含日常 dev / CI 装机；够 1 个开发者用 |
+| Pro | 50 | 多机 / 多 venv 切换 / 团队联调 |
+| Premium | 无限 | 企业 / 大团队 / 持续 CI |
 
-1. ✅ **Krow Cloud 注册邮箱**（用于发 pilot key）
-2. ✅ **真实 plugin 用例描述**（200 字以内，**不是** hello-world；
-   描述你打算用 ``agent.run()`` 解决什么业务）
-3. ✅ **Host 环境**：OS + ``python --version`` 输出
-4. ✅ **承诺事项确认**：
-   - 装机第 3 个工作日内提交 1 份 5 分钟 feedback 表
-   - 同意 [`EULA.md`](./EULA.md) v1.1
-   - 反馈可被匿名化引用到公开 ``roadmap.md``（事先征得您同意）
+升级套餐：[krow.cn/pricing](https://krow.cn/pricing) 或邮件 [sales@krow.cn](mailto:sales@krow.cn)。
 
-### 8.3 时间表
+### 8.3 W2-W3 期间想提前体验？
 
-| 日期 | 阶段 |
-|---|---|
-| 2026-05-23 | Pilot 名单确定（5-10 人）|
-| 2026-05-26 | 邀请邮件 + pilot key 发出 |
-| 2026-05-27 ~ 2026-06-03 | 试装 + 反馈收集 |
-| 2026-06-04 | 反馈 review + 急修 |
-| 2026-06-06 | Public Beta 公告（任何 KROW_API_KEY 持有者可装）|
-| 2026-06-15 | GA（``pip install krow-agent-sdk[runtime-installer]``）|
-
-### 8.4 落选不申请也能怎么试？
-
-W4 之前你**仍然**可以：
+W2-W3 期间（2026-05-23 ~ 2026-06-06）staging endpoint 上线但**仅**接 SDK team 联调用 key（前缀 ``pk-pilot-``）。
+你**仍然**可以：
 
 - ✅ 装公开 ``krow-agent-sdk`` 写 plugin 协议代码（``ToolPlugin`` / ``ACTPlugin``）
 - ✅ 用 ``LLMReplayStore`` 做 record/replay 单元测试（无需 runtime）
 - ✅ 阅读 [``advanced-development-guide.md``](./advanced-development-guide.md) 提前学最佳实践
+- ✅ 加入 [krow.cn](https://krow.cn) 邮件订阅，Public Beta 上线第一时间收到通知
 
-W4 后会自动过渡到 Public Beta —— 不需要"被邀请"。
+### 8.4 早期问题反馈
+
+Public Beta 期遇问题？
+
+- 公开渠道：[GitHub Issues](https://github.com/aullik5/krow-sdk-docs/issues) / [Discussions](https://github.com/aullik5/krow-sdk-docs/discussions)
+- 私邮：[support@krow.cn](mailto:support@krow.cn)（24h 内应答）
+- 错误信息**强烈建议**贴黄金模板原文（含 ``X-Request-Id``，便于后端追踪）
 
 ---
 
