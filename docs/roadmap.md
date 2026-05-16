@@ -40,7 +40,7 @@
 - Tier 1-5 死代码清理（excalidraw / ghost ACT / solution_*/he/local_refiner）✅ 完成
 
 **商业发布层面**：
-- ✅ `krow-agent-sdk==0.8.12.3` 已正式发布 PyPI 主站（2026-05-15）
+- ✅ `krow-agent-sdk==0.8.12.4` 已正式发布 PyPI 主站（2026-05-15）
 - 🚧 EULA v1.1 仍为 DRAFT（good-faith disclosure）；等真律师签字 → v1.x EFFECTIVE → 移除 disclosure
 - 🚧 M9 runtime 上线工作（v2 reverse proxy 实施）
 

@@ -2,7 +2,7 @@
 
 > 本教程让你在 5 分钟内用 Krow Agent SDK 跑一个真实 LLM hello-world，不需要桌面 app、不需要修改 krow 主仓代码。
 >
-> 完整设计 SSOT：[`docs/sdk/plugin-architecture-design.md`](./plugin-architecture-design.md) v0.8。
+> 进阶最佳实践：[`advanced-development-guide.md`](./advanced-development-guide.md)（TURBO 哲学 + 工具设计 + ACT 编写 + 测试）。
 > 适用版本：krow main（含 PR #211 `build()` 自动凭证注入 + cloud 模型 fallback）及之后。
 
 ---
@@ -20,7 +20,7 @@
 
 ## 1. 安装（30 秒）
 
-> **当前发布状态**（2026-05-15）：✅ **`krow-agent-sdk==0.8.12.3` 已发 PyPI 主站**：
+> **当前发布状态**（2026-05-15）：✅ **`krow-agent-sdk==0.8.12.4` 已发 PyPI 主站**：
 > ```bash
 > pip install krow-agent-sdk
 > ```
@@ -328,7 +328,7 @@ agent = (
 )
 ```
 
-`AgentBuilder` 还支持加自定义 `Tool` / `Hint` / `Gate` / `EventListener` / `Observability` plugin —— 详 [`plugin-architecture-design.md`](./plugin-architecture-design.md) §3。
+`AgentBuilder` 还支持加自定义 `Tool` / `Hint` / `Gate` / `EventListener` / `Observability` plugin —— 详 `advanced-development-guide.md`。
 
 ---
 
@@ -635,7 +635,7 @@ finally:
 完成 hello world 后：
 
 1. **业务上**：把第 3 节的 ACT 模板改成你领域的（工业设计 / 法律 / 教研 ...）
-2. **架构上**：读 [`plugin-architecture-design.md`](./plugin-architecture-design.md) §3 的 6 类 mvp_critical plugin protocol（ACT / Tool / Hint / Gate / EventListener / Observability）+ 3 类 experimental（MCPServer / Security / DomainPack）；§5 的 read-only data facade；§6 的 entry_points 自动发现协议
+2. **架构上**：读 `advanced-development-guide.md` 的 6 类 mvp_critical plugin protocol（ACT / Tool / Hint / Gate / EventListener / Observability）+ 3 类 experimental（MCPServer / Security / DomainPack）；§5 的 read-only data facade；§6 的 entry_points 自动发现协议
 3. **测试上**：用 `from krow_test_sdk import HeadlessAgentHarness` 写 plugin 单元测试 + replay LLM E2E（仅 monorepo / 含 tests 的安装可用，wheel 用户用 LLMReplayStore + AgentBuilder）；UI 类 e2e 走 `tests/e2e_framework/` 的 `WorkbenchHarness`（依赖 PySide6，仅 monorepo 内可用）
 4. **生产上**：set `KROW_SDK_TELEMETRY=1` 帮 krow 团队改进 SDK；set `KROW_SDK_HTTP_GATEWAY=1` 让外部 UI 接入
 
@@ -775,7 +775,7 @@ cloud 当前可选清单 → `GET /v1/models`（按 capability 过滤；详 `mod
 - **lifecycle on_load 异常**会 fail-loud；on_unload 异常 log warning 不阻塞 shutdown
 - 主仓 ConcludeGuard 8 gates 任何一个判 FAIL → Agent 会 replan / re-conclude，**不会**让 plugin 错误污染 final output
 
-详 [`plugin-architecture-design.md`](./plugin-architecture-design.md) §4。
+详 `advanced-development-guide.md`。
 
 ---
 

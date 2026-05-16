@@ -18,7 +18,7 @@
 ### Step 2: 装 SDK（公开包 + dev 私有 runtime）
 
 > **当前发布状态**（2026-05-15）：
-> - ✅ `krow-agent-sdk==0.8.12.3` 已发 PyPI 主站 → 直接 `pip install krow-agent-sdk`
+> - ✅ `krow-agent-sdk==0.8.12.4` 已发 PyPI 主站 → 直接 `pip install krow-agent-sdk`
 > - 🚧 私有 runtime wheel + `krow-sdk-install` CLI 处于 M9 上线工作中（详 [`roadmap.md`](./roadmap.md)）
 >
 > **现阶段外部开发者**：可写 plugin + 用 `LLMReplayStore` record/replay 跑单元测试；`agent.run()` 真实跑需等 M9 完成。
@@ -284,8 +284,8 @@ result = agent.run("查询零件 P-1234 的材料和重量")
 | `GatePlugin` | 给 agent 加输出守门（"工业图纸 BOM 必须含 material 字段"）| [`quickstart.md`](./quickstart.md) §4.3 |
 | `EventListenerPlugin` | 监听 agent 内部事件（debug / 监控）| [`quickstart.md`](./quickstart.md) §4.4 |
 | `ObservabilityPlugin` | 接入你的 Datadog / Prometheus | [`quickstart.md`](./quickstart.md) §4.5 |
-| `MCPServerPlugin` | 接入 MCP 协议（远程工具）| [`plugin-architecture-design.md`](./plugin-architecture-design.md) §5.7 |
-| `VisualAdapter` | 视觉 QA（图纸 / 报告 layout 校验）| [`plugin-architecture-design.md`](./plugin-architecture-design.md) §5.10 |
+| `MCPServerPlugin` | 接入 MCP 协议（远程工具）| `advanced-development-guide.md` |
+| `VisualAdapter` | 视觉 QA（图纸 / 报告 layout 校验）| `advanced-development-guide.md` |
 
 ### 今日交付
 
@@ -377,7 +377,7 @@ jobs:
 
 ### 完整 record/replay 文档
 
-[`quickstart.md`](./quickstart.md) §5.5 + [`plugin-architecture-design.md`](./plugin-architecture-design.md) §6.
+[`quickstart.md`](./quickstart.md) §5.5 + `advanced-development-guide.md`.
 
 ### 今日交付
 
@@ -397,26 +397,26 @@ jobs:
 - **自定义 Hint**：给 agent 加领域专家直觉降低 LLM 调用次数
 - **自动 adapt / replan**：当 agent 卡住时让它换思路（不用你写 if/else）
 
-→ [`plugin-architecture-design.md`](./plugin-architecture-design.md) §3.2 + §5.3
+→ `advanced-development-guide.md` + §5.3
 
 ### 路径 B：视觉 QA（工业 / 科研团队特别有用）
 
 - **VisualAdapter**：把 agent 输出（CAD 图 / 论文 layout / 流程图）丢给视觉模型做合规校验
 - **verify_fix 协议**：视觉模型发现问题 → agent 自动修
 
-→ [`plugin-architecture-design.md`](./plugin-architecture-design.md) §5.10 + Step 2 P2 (PR #239)
+→ `advanced-development-guide.md` + Step 2 P2 (PR #239)
 
 ### 路径 C：数据层接入
 
 - **DomainPackPlugin**：自定义实体抽取规则（科研：抽 author / venue / dataset；工业：抽 part / supplier / certification）
 - **wiki_compiler**：让 agent 把多文档抽出的 evidence 自动汇总成 wiki
 
-→ [`plugin-architecture-design.md`](./plugin-architecture-design.md) §5.9 + §5.11
+→ `advanced-development-guide.md` + §5.11
 
 ### 路径 D：MCP 协议（接入第三方 MCP server）
 
 - 你公司有 MCP server？用 `MCPServerPlugin` form-A/B/C 三种形态接入
-- 完整范例 → [`plugin-architecture-design.md`](./plugin-architecture-design.md) §5.7
+- 完整范例 → `advanced-development-guide.md`
 
 ---
 
@@ -469,7 +469,7 @@ jobs:
 |---|---|
 | [`README.md`](./README.md) | 文档地图 + 故障排查索引（必读）|
 | [`quickstart.md`](./quickstart.md) | 5 分钟跑通；含 5 类 plugin 范例 |
-| [`plugin-architecture-design.md`](./plugin-architecture-design.md) | 协议层 SSOT；写 plugin 必看 |
+| `advanced-development-guide.md` | 协议层 SSOT；写 plugin 必看 |
 | [`runtime-install.md`](./runtime-install.md) | runtime wheel 装机详细步骤 |
 | `source-protection-design.md` (internal) | 给架构师；插件作者可跳过 |
 | [`roadmap.md`](./roadmap.md) | SDK 进度 SSOT |
