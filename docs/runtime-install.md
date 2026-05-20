@@ -1,18 +1,25 @@
 # Krow Agent SDK Runtime 安装指南（外部开发者）
 
-> **当前状态（2026-05-16）** 🚀：v2 reverse-proxy 协议**已与 Krow Cloud team 锁定**，
-> 进入 **W1-W4 实施期**（详 [`roadmap.md`](./roadmap.md) Step 2 P3 / M9）。
-> 真实的"装包就能 ``agent.run()``"路径预计 **2026-06** 完成上线。
+> **当前状态（2026-05-19 W5 closeout）** ✅：v2 reverse-proxy 协议**全部上线，外部开发者可一行装齐**：
 >
-> **现阶段（2026-05）外部开发者实际可用路径**：
-> - ✅ ``pip install krow-agent-sdk`` → 写 plugin + 用 `LLMReplayStore` record/replay 测试
-> - 🚧 ``agent.run("...")`` 真实跑：等 W4 完成；可加入 pilot 名单优先体验
->     （联系 [support@krow.cn](mailto:support@krow.cn)）
+> ```bash
+> pip install krow-agent-sdk krow-sdk-install
+> export KROW_API_KEY=sk-user-xxxxxxxxxxxxxxxxxxxxx
+> krow-sdk-install
+> # → 走 prod gateway api.krow.cn/sdk/runtime/pypi/simple/ + files/
+> # → 装上 krow-agent-sdk-runtime + 100+ deps
+> # → agent.run("...") 真实跑通
+> ```
 >
-> **设计 v2 reverse-proxy（2026-05-16 锁定）**：
+> **变更历史**：
+> - 2026-05-19（W5 closeout）：`krow-sdk-install` 首次上 PyPI prod（trusted publisher 配置完成）；三 cookbook real LLM E2E 多次 stable PASSED；W5 修复 5 个 P0 bug（详 ``CHANGELOG_v0.8.12.11.md` (internal design doc)`）
+> - 2026-05-19（W4 closeout）：完整 install 链路 SDK team 实测跑通（4 分 33 秒装 runtime + SDK + 100+ deps）；prod gateway DNS cutover 完成
+> - 2026-05-16：v2 reverse-proxy 协议与 Krow Cloud team 锁定
+>
+> **设计 v2 reverse-proxy**：
 > - 私有 runtime wheel 走 **Krow Cloud 反向代理** 分发：
 >   `https://api.krow.cn/sdk/runtime/pypi/{simple,files}/...`
-> - Storage：火山引擎 TOS（cn-shanghai，bucket `krow-sdk-runtime`）
+> - Storage：火山引擎 TOS（cn-shanghai，bucket `krow-sdk-runtime`；HK transit + CRR）
 > - 鉴权：`KROW_API_KEY` Bearer token，gateway 内套餐 entitlement + rate limit + 计量
 > - 客户感知：与装公开 wheel 体感一致，但走 Krow Cloud 一站式鉴权（不需要 GitHub PAT，不需要单独配 index-url）
 >
@@ -66,6 +73,10 @@ pipx install krow-sdk-install
 pip install krow-sdk-install
 ```
 
+✅ **2026-05-19 W5 起：`krow-sdk-install` 已上 PyPI prod**：
+- 验证版本：https://pypi.org/project/krow-sdk-install/0.8.12.11/
+- 无需任何 staging / private registry 配置 → `pip install krow-sdk-install` 直接走 PyPI 公网
+
 ---
 
 ## 2. 装 Runtime Wheel（一行）
@@ -78,7 +89,7 @@ krow-sdk-install --api-key $KROW_API_KEY
 
 1. CLI 调 Krow Cloud `GET /sdk/runtime/pypi/simple/krow-agent-sdk-runtime/`
    （Bearer ``$KROW_API_KEY``）拉 PEP 503 index
-2. Krow Cloud gateway 鉴权 + 套餐 entitlement（Free 无 / Basic 10 次/天 / Pro 50 / Premium 无限）+ rate limit（10/min simple + 5/min files）
+2. Krow Cloud gateway 鉴权（仅检查 key 是否被撤销 — wheel 下载本身**不计费**，所有套餐均可正常 install；详 §6.1）+ rate limit（10/min simple + 5/min files）
 3. CLI 取 manifest 内对应当前 OS / Python 版本的 wheel，调 `GET /sdk/runtime/pypi/files/...` 走 TOS 流式下载
 4. CLI 校验 wheel SHA256 与 manifest 一致 → `pip install` 本地
 
@@ -95,6 +106,22 @@ krow-sdk-install --api-key $KROW_API_KEY --upgrade
 ```bash
 krow-sdk-install --api-key $KROW_API_KEY --version 0.8.12  # 与 krow-agent-sdk 同名版本号
 ```
+
+### 2.2.1 自定义 Cloud endpoint（staging / 私有部署）
+
+99% 用户**不用看**这一节 — 默认走 `https://api.krow.cn` 就 OK。
+
+需要切走时（pilot / staging 联调 / 私有化部署）调 `--base-url` flag 或 `KROW_BASE_URL` env var：
+
+```bash
+# 走 staging gateway（pk-pilot- key 必须配 staging endpoint）
+krow-sdk-install --api-key pk-pilot-xxx --base-url https://api-staging.krow.cn
+
+# 私有化部署
+KROW_BASE_URL=https://krow-gateway.acme.internal krow-sdk-install --api-key sk-tenant-xxx
+```
+
+> SDK 端 `AgentBuilder.with_base_url("...")` 与本 flag 一一对应；保持一致才能让 `krow-sdk-install` + `agent.run()` 两端走同一个 cloud endpoint。详 [`api-reference.md` §2.4 `with_base_url`](./api-reference.md#22-工厂方法)。
 
 ### 2.3 校验安装
 
@@ -163,11 +190,17 @@ finally:
 2. 到 https://krow.cn/dashboard 查 key 状态
 3. 如已撤销 → 生成新 key
 
-### Q2: 跑 ``krow-sdk-install`` 报 ``❌ 您的账户未开通 SDK Runtime``
+### Q2: 跑 ``krow-sdk-install`` 报 ``402 InsufficientBalance``
 
-**原因**：免费（Free）套餐默认不含 SDK Runtime entitlement.
+**原因**：账户 CP 余额不足。Cloud team 2026-05-19 W4 release 起，**install 阶段不计费**，
+所有套餐（含 Free）都可正常装 `krow-agent-sdk-runtime`；但**LLM 调用按 CP 计费**，
+首次调 LLM 时若余额（`member_cp + wallet_cp`）为 0 会返回 402.
 
-**修法**：联系 [sales@krow.cn](mailto:sales@krow.cn) 升级到 **Basic** 套餐及以上（Basic 10 次/天 / Pro 50 次/天 / Premium 无限；详 cloud-team 协议锁定 §3.1）.
+**修法**：
+
+- 充值：访问 [https://krow.cn/wallet](https://krow.cn/wallet) 加充 wallet CP（永久有效）
+- 升级会员：访问 [https://krow.cn/membership](https://krow.cn/membership) 购买 Basic / Pro / Premium 月度套餐（详 §6.2 套餐表）
+- 联系 [sales@krow.cn](mailto:sales@krow.cn) 申请 dev/test 套餐扩额
 
 ### Q3: ``import modules.agent.react_engine`` 报 ``ModuleNotFoundError``
 
@@ -183,6 +216,37 @@ krow-sdk-install --api-key $KROW_API_KEY
 # 如果有但仍报错：
 python --version  # 确认 3.11 / 3.12 / 3.13
 ```
+
+### Q3.5: 装时报 ``❌ 当前 host 没匹配的 runtime wheel`` (PEP 425 mismatch)
+
+**原因**：你的 host platform tag 不在 runtime wheel matrix 内，或 `krow-sdk-install`
+< 0.8.12.12 的旧版本因 bug 把 macOS / Linux 兼容 wheel 也误判为 mismatch（见
+`CHANGELOG_v0.8.12.12 (internal design doc)`）。
+
+**先升级 installer**（**强烈推荐**）：
+
+```bash
+pip install -U krow-sdk-install   # 必须 ≥ 0.8.12.12
+krow-sdk-install --api-key $KROW_API_KEY
+```
+
+0.8.12.12+ 用 `packaging.tags.sys_tags()` 做 PEP 425 兼容性匹配（与 `pip` 行为
+一致），自动识别：
+
+- macOS arm64 / x86_64 ↔ `universal2` wheel
+- Linux x86_64 ↔ `manylinux_*_x86_64` / `linux_x86_64` wheel
+- 任意 Python ABI ↔ `abi3` 通用 wheel
+- macOS deployment target 向后兼容（10.13 wheel 可装 14.0 系统）
+
+**升级后仍 mismatch**：runtime 当前矩阵是 **3 OS（Linux / macOS / Windows）× 3
+Python（3.11 / 3.12 / 3.13）= 9 wheels**。其他平台（aarch64-linux / FreeBSD /
+Python 3.10 ↓）暂不支持，可：
+
+1. **切到支持的 Python**（推荐）：`pyenv install 3.13` 或装 conda env 锁 3.13
+2. **联系 Krow 扩矩阵**：mailto:support@krow.cn 申请你的目标平台（注明 OS /
+   架构 / Python 版本 / 业务场景）
+3. **手动挑 wheel**：`krow-sdk-install --api-key $KROW_API_KEY --download-only`
+   拿到 9 wheels 后，自行选最接近的手 `pip install`
 
 ### Q4: Krow Cloud 不可达 (HTTP 504 / DNS error)
 
@@ -283,16 +347,30 @@ W2 staging gateway + IAM 凭据由 Cloud team 在 2026-05-23 周交付，W3 联�
 | **2026-06-06** | **Public Beta 开放** — 所有持 ``KROW_API_KEY`` 的开发者直接装 | 跑 ``krow-sdk-install --api-key $KROW_API_KEY``（详 §3 上面）|
 | **2026-06-15** | GA — ``pip install krow-agent-sdk[runtime-installer]`` 一键 | 升级到 ``[runtime-installer]`` extras |
 
-### 8.2 套餐配额（Public Beta 期）
+### 8.2 套餐与 CP 计费（W4 cloud-team-reply 2026-05-19 起）
 
-| 套餐 | runtime 下载配额（次/天）| 说明 |
+**重要**：W4 起 install 阶段**不计费**，所有套餐（含 Free）都可正常装 runtime。
+计费维度从"次/天"改为**统一 CP**（Krow Cloud 全平台共享一套 wallet）。
+
+| 套餐 | 月度会员 CP（`member_cp`） | 说明 |
 |---|---|---|
-| Free | 0 | 不开放（仅公开 SDK + LLMReplayStore 体验）|
-| Basic | 10 | 含日常 dev / CI 装机；够 1 个开发者用 |
-| Pro | 50 | 多机 / 多 venv 切换 / 团队联调 |
-| Premium | 无限 | 企业 / 大团队 / 持续 CI |
+| Free | 0 | 可正常装 SDK Runtime；LLM 调用首次会撞 `402 InsufficientBalance` 提示充值或购买会员 |
+| Basic | 500,000 | 按购买日历月重置 |
+| Pro | 2,000,000 | 按购买日历月重置 |
+| Premium | 10,000,000 | 按购买日历月重置 |
 
-升级套餐：[krow.cn/pricing](https://krow.cn/pricing) 或邮件 [sales@krow.cn](mailto:sales@krow.cn)。
+#### 统一 CP 抽象
+
+```
+total_cp = member_cp + wallet_cp
+```
+
+- **`member_cp`**：会员月度阅读额度，每月按购买日历重置；非会员该项为 0
+- **`wallet_cp`**：钱包余额（充值 / 邀请奖励 / 活动赠送），永久有效，不重置
+
+扣费顺序：先扣 `member_cp`，用尽后自动转 `wallet_cp`，用户无感（详 [w4-cloud-team-reply.md §2](https://github.com/aullik5/krow/blob/main/docs/sdk/w4-cloud-team-reply.md#%C2%A72-%E4%BC%9A%E5%91%98%E4%BD%93%E7%B3%BB%E4%B8%8E%E8%AE%A1%E8%B4%B9)）。
+
+升级会员：[krow.cn/membership](https://krow.cn/membership) 或充值钱包：[krow.cn/wallet](https://krow.cn/wallet) 或联系 [sales@krow.cn](mailto:sales@krow.cn)。
 
 ### 8.3 W2-W3 期间想提前体验？
 

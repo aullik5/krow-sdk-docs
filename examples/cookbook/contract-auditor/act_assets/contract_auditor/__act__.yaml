@@ -1,0 +1,18 @@
+name: contract_auditor
+description: |
+  企业合同审阅（NDA / 服务协议 / 商务合同）：
+  条款切分 + 15 类分类 + 风险评分（high/medium/low）+ redline diff +
+  风险报告 PDF 输出。法务红线强制人工 review。
+when_to_enter:
+  - 用户要 review 合同 / NDA / 服务协议 / 采购协议
+  - 输入是 docx / pdf 合同文件
+  - 输出是风险报告 + redline + 审计日志
+tools:
+  - contract_auditor_split_clauses
+  - contract_auditor_classify_clauses
+  - contract_auditor_score_clause_risk
+  - contract_auditor_redline_diff
+  - contract_auditor_index_terms
+  - word_smart_export        # SSOT 复用 Krow 内置（输出 docx / pdf）
+  - read_file
+  - write_file

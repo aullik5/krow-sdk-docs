@@ -1,0 +1,30 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Demo runtime outputs (never commit)
+output/
+*.audit.jsonl
+review_outline.json
+review_progress.jsonl
+review_section_*.md
+review_full.md
+review_full.docx
+review_full.pdf
+citation_graph.dot
+citation_graph.svg
+
+# Sample PDFs（受版权约束，不可提交）
+sample_data/*.pdf
+
+# Local env
+.env
+.env.*
+*.local
+
+# IDE
+.idea/
+.vscode/

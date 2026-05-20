@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-financial-analyst"
+version = "0.1.0"
+description = "Krow SDK Cookbook v3 · 财经分析员 demo（年报横向对比 + 投资简报 + Prometheus）"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "krow-agent-sdk>=0.8.12.5",
+    # PDF 抽取 —— pdfplumber 是首选（生产级）；PyMuPDF 是 fallback
+    "pdfplumber>=0.10",
+]
+
+[project.optional-dependencies]
+# 注：投资简报 PDF 输出**复用** Krow 内置 word_smart_export 工具（SSOT），
+# 不需要在本 cookbook 加 fpdf2 / reportlab 等 PDF 库依赖（与 v2 data-analyst 一致）。
+# Demo 模式下 ObservabilityPlugin 自动降级 stdout，prometheus-client 可选。
+obs = [
+    "prometheus-client>=0.19",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "financial_analyst_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "financial_analyst_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+    "tests/**",
+    "pyproject.toml",
+    ".gitignore",
+]

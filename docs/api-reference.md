@@ -174,7 +174,7 @@ from krow_agent_sdk.experimental.protocols import (
 # 错误类（fail-loud 边界）
 from krow_agent_sdk.errors import (
     KrowSDKError,                    # 根基类
-    MissingKrowAPIKeyError, InvalidKrowAPIKeyError,
+    MissingKrowAPIKeyError, InvalidKrowAPIKeyError, InvalidKrowBaseURLError,
     KrowAPIKeyInvalidError, KrowQuotaExceededError, LLMProviderError,
     MissingProjectRootError, ProjectRootNotWritableError,
     PluginSignatureMismatchError, InvalidPluginIDError,
@@ -306,6 +306,52 @@ agent = (
     .build()
 )
 ```
+
+#### `with_base_url(url: str) -> AgentBuilder` (W4 新增 · staging / 私有部署)
+
+覆盖默认 cloud API base URL（`https://api.krow.cn`），用于：
+
+- **Pilot / Staging 联调**：`https://api-staging.krow.cn` 走 SDK team 内部环境（需 `pk-pilot-` key 配套）
+- **私有化部署 (on-prem)**：客户自建 gateway，如 `https://krow-gateway.acme.internal`
+- **自动化测试**：本地 mock gateway 端口（如 `https://127.0.0.1:18443` 走自签证书）
+
+| 字段 | 说明 |
+|---|---|
+| `url` | 完整 HTTPS base URL，**必须** `https://` 前缀；**禁止**尾部斜杠；**禁止**含 path 段 |
+| **格式校验** | 立即校验：违反任一规则 → 抛 [`InvalidKrowBaseURLError`](#12-errors--错误层与黄金模板) |
+| **作用域** | 注入到 3 处 SSOT（`config.settings.module_interfaces.krow.api_base_url` / 已注册 `LLMProvider.api_url` / `KrowLLMProvider._api_base`）；所有 LLM / image / OCR / metadata 调用均路由到该 URL |
+| **不调** | 默认走 `https://api.krow.cn`（生产）|
+| **多次调** | 后调覆盖前调（last-call-wins） |
+
+```python
+# 1. Staging 联调（pk-pilot- key）
+agent = (
+    AgentBuilder()
+    .with_krow_api_key("pk-pilot-xxx")
+    .with_base_url("https://api-staging.krow.cn")  # 走 staging
+    .with_project_root("/data/x")
+    .build()
+)
+
+# 2. 私有化部署
+agent = (
+    AgentBuilder()
+    .with_krow_api_key("sk-tenant-xxx")
+    .with_base_url("https://krow-gateway.acme.internal")
+    .build()
+)
+```
+
+| 错误（[`InvalidKrowBaseURLError`](#12-errors--错误层与黄金模板)） | 触发 |
+|---|---|
+| `非 HTTPS` | `http://api.krow.cn` / `ws://...` 等非 https |
+| `含尾部斜杠` | `https://api.krow.cn/` |
+| `含 path 段` | `https://api.krow.cn/v1` / `.../api` 等 |
+| `空字符串` | `with_base_url("")` |
+
+> **何时不需要调**：用 `sk-` 生产 key + 默认 `https://api.krow.cn` → **不要**调；调了反而会被 cloud 拒（cross-tenant）。
+>
+> **常见踩坑**：把 `with_base_url("https://api.krow.cn/v1")` 写成带 `/v1` 后缀 — SDK 会内部加 `/v1/...`，导致最终 URL 变 `/v1/v1/chat/completions` 404。
 
 #### `with_http_gateway(*, enable=True, host="127.0.0.1", port=8090, auth_token=None, dry_run=False) -> AgentBuilder` (⚠️ experimental)
 
@@ -1987,6 +2033,7 @@ RuntimeError
     ├── 认证 / API Key 类
     │   ├── MissingKrowAPIKeyError       # 既未 with_krow_api_key 也未 KROW_API_KEY env
     │   ├── InvalidKrowAPIKeyError       # 格式校验失败（非 sk- 前缀 / 含非法字符 / 长度不足）
+    │   ├── InvalidKrowBaseURLError      # with_base_url(url) 格式不符 (非 https / 含 path / 尾斜杠)
     │   ├── KrowAPIKeyInvalidError       # 首次 LLM 调用 401（cloud 拒绝）
     │   ├── KrowQuotaExceededError       # LLM 调用 402（余额 / 配额超限）
     │   └── LLMProviderError             # LLM 网络 / 5xx / fallback 链耗尽
@@ -2008,6 +2055,7 @@ RuntimeError
 |---|---|---|
 | `MissingKrowAPIKeyError` | `build()` 时既未 `with_krow_api_key` 也未 env | — |
 | `InvalidKrowAPIKeyError` | `with_krow_api_key(key)` 调用时 | `masked_key` |
+| `InvalidKrowBaseURLError` | `with_base_url(url)` 调用时 (非 https / 含 path / 尾斜杠 / 空) | `url` |
 | `KrowAPIKeyInvalidError` | 首次 LLM 调用 cloud 返 401 | — |
 | `KrowQuotaExceededError` | LLM 调用 cloud 返 402 | — |
 | `LLMProviderError` | LLM 重试链耗尽 | `reason` |

@@ -6,7 +6,7 @@
 > - [`api-reference.md`](./api-reference.md) — 完整 API 手册（15 章 / 57 子节）
 > - [`advanced-development-guide.md`](./advanced-development-guide.md) — TURBO 哲学 / 工具设计 / 测试方法论
 >
-> **适用版本**：`krow-agent-sdk >= 0.8.12.5`（`build()` 自动凭证注入 + cloud 模型 fallback + 6 个 `with_<cat>_model` API）。
+> **适用版本**：`krow-agent-sdk >= 0.8.12.11`（W5 closeout：cookbook real LLM E2E user-value oriented 多维断言 + 5 P0 bug 治本 + krow-sdk-install PyPI prod 上线 + 三 cookbook 多次 stable PASSED）。
 
 ---
 
@@ -23,14 +23,15 @@
 
 ## 1. 安装（30 秒）
 
-> **当前发布状态**（2026-05-16）：✅ **`krow-agent-sdk==0.8.12.5` 已发 PyPI 主站**：
+> **当前发布状态**（2026-05-19 W5 closeout）：✅ **PyPI 三件套全齐**：
 > ```bash
-> pip install krow-agent-sdk
+> pip install krow-agent-sdk==0.8.12.11        # 公开 SDK（plugin protocol + facade）
+> pip install krow-sdk-install==0.8.12.11      # runtime 安装 CLI（W5 首次 PyPI prod）
+> krow-sdk-install --api-key $KROW_API_KEY     # 走 prod gateway 拉 sdk-runtime wheel
 > ```
+> sdk-runtime 0.8.12.10 已可装（W4 closeout）；0.8.12.11 prod publish 进行中（tag `runtime-v0.8.12.11`）。
 > EULA 当前为 v1.1 DRAFT（含 good-faith 披露），等真律师签字后转 EFFECTIVE
 > （详 [`roadmap.md`](./roadmap.md) Step 2 P2）。
-> **runtime wheel** 处于 M9 v2 reverse-proxy **W1-W4 实施中**（2026-05-16 与 Cloud team 协议锁定）；
-> 详见 [`runtime-install.md`](./runtime-install.md)。不影响写 plugin + record/replay 测试。
 >
 > 下文 §1.1-§1.2 是 **Krow team collaborator** 的开发模式入门（monorepo / dev wheel）；
 > 外部开发者请直接用 §1.0 的 `pip install krow-agent-sdk`。
@@ -56,7 +57,7 @@ python -c "from krow_agent_sdk import AgentBuilder; print('SDK OK')"
 ### 1.1 Collaborator 模式：克隆 krow 主仓 + 装 SDK extras
 
 ```bash
-git clone https://github.com/aullik5/krow.git
+# (内部 monorepo 私有；外部开发者请用 pip install)
 cd krow
 python -m venv .venv
 .venv\Scripts\activate           # Windows
@@ -615,6 +616,31 @@ finally:
 | `KROW_SDK_TELEMETRY` | `0` | opt-in 上报 SDK 使用统计（不含敏感数据） |
 | `KROW_SDK_HTTP_GATEWAY` | `0` | opt-in 启动 HTTP gateway，让外部 UI 通过 HTTP 调 SDK |
 | `KROW_SDK_BUILD_VALIDATE_CONNECTION` | `1` | build() 内 GET /v1/models 验证 + 模型 fallback |
+
+### 6.1 自定义 cloud endpoint（staging / 私有部署 / 自动化测试）
+
+**默认**走生产 `https://api.krow.cn`；99% 用户**不需要**改。
+
+需要切走时（pilot / staging 联调 / 私有化部署 / 本地 mock）调 `with_base_url(url)`：
+
+```python
+agent = (
+    AgentBuilder()
+    .with_krow_api_key("pk-pilot-xxx")               # SDK pilot key（仅 staging 可用）
+    .with_base_url("https://api-staging.krow.cn")    # 切到 staging gateway
+    .with_project_root("/data/x")
+    .build()
+)
+```
+
+| URL 规则 | 触发 [`InvalidKrowBaseURLError`](./api-reference.md#122-错误详细表) |
+|---|---|
+| 必须 `https://` 前缀 | `http://...` / `ws://...` 抛错 |
+| **禁止**尾部斜杠 | `https://api.krow.cn/` 抛错 |
+| **禁止**含 path 段 | `https://api.krow.cn/v1` 抛错（SDK 内部会加 `/v1`） |
+| 多次调 | last-call-wins（覆盖前调） |
+
+完整说明：[`api-reference.md` §2.4 `with_base_url`](./api-reference.md#22-工厂方法)。
 
 ---
 

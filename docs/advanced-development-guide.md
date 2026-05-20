@@ -1,11 +1,17 @@
 # Krow Agent SDK — 进阶开发最佳实践
 
 > 给"已读完 [`quickstart.md`](./quickstart.md)、写过第一个 plugin"的外部开发者。
-> 本文档解释**为什么 Krow Agent 这样设计**，让你写的 plugin 能与 SDK 主路径协同得当（不撞规则、不翻车、不踩坑）。
+> 本文档解释**写 plugin 的实战最佳实践**，让你的 plugin 能与 SDK 主路径协同得当（不撞规则、不翻车、不踩坑）。
 >
 > 阅读节奏：约 60 分钟通读 + 写 plugin 时按需回查。
 >
 > 本文档与 SDK 主仓内部使用的 [`AGENTS.md`](https://pypi.org/project/krow-agent-sdk/) 元规则同源（提炼对外公开级内容）。
+
+> **本文档与 [`concepts/`](./concepts/) 目录的边界**（按 [Diátaxis](https://diataxis.fr/) 框架）：
+> - 本文档 = **How-to**（"应该怎么写好 plugin"）— 实战最佳实践 + 反模式
+> - [`concepts/`](./concepts/) = **Explanation**（"krow 内部如何工作 / 为什么这样设计"）— Agent lifecycle / Progressive Execution / Budget / ConcludeGuard / ExperienceMemory
+>
+> 两者互补，不重复。如果你想理解机制而不仅仅是"按规矩写"，先去看 `concepts/`。
 
 ---
 
@@ -529,43 +535,207 @@ LLM context 是稀缺资源。一个 ACT 的 hint 加起来 > 2K token → 反�
 
 **关键约束**：HintPlugin 输出是**给 LLM 看的**，**不能**直接控制 agent 行为。如果你要"强制不让某事发生" → GatePlugin。
 
+```python
+from typing import Optional
+
+
+class FinanceDomainHintPlugin:
+    """领域知识 hint：用户做金融数据分析时给 LLM 注入业界最佳实践。
+
+    实现 ``krow_agent_sdk.protocols.HintPlugin`` Protocol：
+    - ``plugin_id`` (property/class attr)
+    - ``applicable_acts`` (property/class attr) → list[str]
+    - ``hint_for(context: dict) -> Optional[str]``
+    """
+
+    plugin_id = "acme.finance_hints"
+
+    # 空 list = 全局 hint；写具体 ACT 名 = 仅在那些 ACT 内触发
+    applicable_acts = ["data_analyst", "finance_research"]
+
+    def hint_for(self, context: dict) -> Optional[str]:
+        """根据运行时 context 决定是否产出 hint 文本。
+
+        ``context`` 由 SDK 注入，常见字段：
+            - act_name: 当前 ACT
+            - user_input: 用户原始输入
+            - tool_name: 即将调用的工具（若在工具调用前的 hint 注入点）
+            - step_index: 当前 macro step 编号
+
+        返回 None / 空串 / 抛异常 → 视为"本 hint 不适用"，跳过即可。
+        """
+        user_input = (context.get("user_input") or "").lower()
+
+        # 软提示 1：金融时序数据
+        if any(kw in user_input for kw in ("股票", "k线", "金融", "财务", "收益率")):
+            return (
+                "## 金融数据分析建议\n"
+                "- 收益率分布通常右偏 → 用 log-return 而不是 simple return\n"
+                "- 检查异常值前先做 Q-Q 图判断分布形态\n"
+                "- 时序数据要先看 ADF 平稳性再做回归\n"
+            )
+
+        # 软提示 2：用户给了一个 csv 但没说怎么分析
+        if context.get("tool_name") == "data_analyst_compute_stats":
+            cols = context.get("dataframe_columns", [])
+            if any(c.lower() in ("date", "timestamp", "time") for c in cols):
+                return (
+                    "提示：检测到时间列，建议在 markdown 报告里加一段"
+                    "时序图说明（同环比、趋势、季节性）。"
+                )
+
+        return None  # 不适用 → 不注入 hint
+```
+
+**注册到 Agent**：
+
+```python
+from krow_agent_sdk import AgentBuilder
+
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(api_key)
+    .with_hint_plugin(FinanceDomainHintPlugin())   # ← 注册
+    .build()
+)
+```
+
+**反模式（与上表一致）**：
+
+| ❌ 错误 hint | ✅ 正确做法 |
+|---|---|
+| `return "禁止使用 simple return"` | 这是硬约束 → 写 GatePlugin 在 compute_stats 入口拦截 |
+| `return "log-return = log(P_t/P_{t-1})"`（公式细节） | 应放工具的 docstring（ToolManager 注入工具签名时一起带），不要塞 hint context |
+| `return "你必须先问用户股票代码"` | 这是流程强制 → 在 ACT extended.md 的 workflow 里写 step 0；hint 是软建议不强制 |
+| `hint_for` 内 `requests.get(...)` 远程拉知识库 | 慎用 — hint 在 prompt 拼接热路径，IO 慢 → 推迟到工具内做 |
+
 ### 5.2 GatePlugin（**硬**守门）
 
-`Gate` = 在 agent 行为之前插入的"检查闸"，不通过就**fail-loud**。
+`Gate` = 在 agent conclude 之前插入的"检查闸"，不通过就**fail-loud**。
 
 **典型用例**：
 
 | 用例 | 实现 |
 |---|---|
-| 不允许 agent 在生产路径写文件 | Gate 检查 `path` 参数是否在白名单 |
-| 不允许 agent 在工作时间外触发邮件 | Gate 检查当前时间 |
+| 不允许 agent 在生产路径写文件 | Gate 检查 `recent_tool_results` 里 write_* 工具的 path 参数 |
+| CSV 含 PII 字段（手机/身份证）禁止流到 LLM | Gate 扫描 read_csv 返回的 columns（cookbook `PIIDetectorGate`）|
 | Agent 调某 API 单次超过 1000 元成本上限 | Gate 检查累计 token 消耗 |
-| Agent 准备 conclude 但还没完成必要步骤 | ConcludeGuard Gate 链 |
+| Agent 准备 conclude 但还没完成必要步骤 | ConcludeGuard Gate 链（主仓内置 8 gates） |
 
 **铁律**：
 
-- Gate 失败 = **agent 任务失败**，不是 retry。
+- Gate 失败 = **conclude 被 BLOCK**，黄金错误模板回送 LLM 让其改方案。
 - Gate 不应做"软警告"那是 HintPlugin 的事。
-- Gate 应给清晰错误信息（黄金模板）让用户知道为什么挂掉。
+- Gate 应给清晰错误信息（黄金模板）让用户/LLM 知道为什么挂掉。
+
+#### GatePlugin 完整公开 API
+
+外部 plugin 写 Gate 必备的全部公开 API（自 SDK v0.8.13.0 起 re-export 到 `krow_agent_sdk.protocols`）：
+
+| 名字 | 用途 |
+|---|---|
+| `GatePlugin` | Protocol —— plugin 入口签名（`plugin_id` / `phase` / `get_gate()`） |
+| `GatePhase` | Literal `"macro"` / `"micro"` —— gate 工作位面 |
+| `Gate` | Protocol —— gate 实例签名（`name` / `priority` / `evaluate(parsed, context)`） |
+| `GateDecision` | dataclass —— gate 返回值（`verdict` / `reason` / `gate_name`） |
+| `GateVerdict` | Enum —— `ALLOW` / `BLOCK` / `DEFER` 三态 |
+| `make_simple_gate(name, priority, evaluator)` | factory —— 把函数包装成 `Gate` 实例 |
+
+> 历史注解（v0.8.12.x 之前）：SDK 只暴露 `GatePlugin` Protocol 但不暴露 `GateDecision` /
+> `GateVerdict` / `make_simple_gate`，外部 plugin 实际**写不出** Gate 实例。本 gap
+> 已在 v0.8.13.0 修复——全部 6 个名字一起 re-export。
+
+#### GatePlugin Protocol 真实签名
 
 ```python
-class MyGate(GatePlugin):
-    name = "production_path_gate"
+@runtime_checkable
+class GatePlugin(Protocol):
+    @property
+    def plugin_id(self) -> str: ...   # 全局唯一 ID，<org>.<plugin_name>
 
-    def check(self, ctx: GateContext) -> GateDecision:
-        write_path = ctx.tool_args.get("path", "")
-        if "/production/" in write_path:
-            return GateDecision(
-                pass_=False,
-                reason=(
-                    "❌ 不允许在生产路径写文件。\n"
-                    f"   位置：path = {write_path}\n"
-                    f"   修法：1) 改写路径到 ./workspace/；"
-                    f"2) 联系 ops 申请生产权限。"
-                ),
-            )
-        return GateDecision(pass_=True)
+    @property
+    def phase(self) -> GatePhase: ... # "macro" | "micro"
+
+    def get_gate(self) -> Gate: ...   # 返回 Gate 实例（满足 Gate Protocol）
 ```
+
+#### 完整代码示例：PIIDetectorGate（cookbook 真实实现）
+
+```python
+from krow_agent_sdk.protocols import (
+    GateDecision, GateVerdict, GatePlugin, make_simple_gate,
+)
+
+_PII_KEYWORDS = {"phone", "mobile", "email", "id_card", "ssn",
+                 "手机", "身份证", "邮箱", "银行卡"}
+
+
+class PIIDetectorGate:
+    """合规守门：检测 column 名含 PII 关键词时 BLOCK conclude."""
+
+    plugin_id = "acme.pii_gate"
+    phase = "macro"  # macro ReACT conclude 之前评估
+
+    def __init__(self, *, allow_pii: bool = False) -> None:
+        self._allow_pii = allow_pii
+
+    def get_gate(self) -> Gate:
+        allow_pii = self._allow_pii
+
+        def evaluate(parsed: dict, context: dict) -> GateDecision:
+            if allow_pii:
+                return GateDecision(
+                    verdict=GateVerdict.ALLOW,
+                    reason="allow_pii=True 已显式放行",
+                    gate_name="pii_detector",
+                )
+            for tr in context.get("recent_tool_results", []):
+                if tr.get("tool_name") != "data_analyst_read_csv":
+                    continue
+                cols = tr.get("result", {}).get("columns", []) or []
+                hits = [c for c in cols
+                        if any(kw in str(c).lower() for kw in _PII_KEYWORDS)]
+                if hits:
+                    return GateDecision(
+                        verdict=GateVerdict.BLOCK,
+                        reason=(
+                            f"❌ PII 守门：检测到含敏感字段的列 {hits}\n"
+                            "   位置：data_analyst_read_csv 返回 columns\n"
+                            "   修法：\n"
+                            "     1. 让用户先脱敏后再上传（hash / mask 末 4 位）\n"
+                            "     2. 或调用层加 allow_pii=True 显式承担合规风险\n"
+                            "     3. 合规依据：GDPR Art.5 数据最小化原则"
+                        ),
+                        gate_name="pii_detector",
+                    )
+            return GateDecision(verdict=GateVerdict.DEFER, gate_name="pii_detector")
+
+        return make_simple_gate(name="pii_detector", priority=50, evaluator=evaluate)
+```
+
+**注册到 AgentBuilder**：
+
+```python
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(api_key)
+    .with_project_root(root)
+    .with_gate_plugin(PIIDetectorGate(allow_pii=False))   # 硬守门
+    .with_tool_plugin(DataAnalystToolPlugin())
+    .build()
+)
+```
+
+**`evaluate(parsed, context)` 三态返回**：
+
+| 返回 | 行为 |
+|---|---|
+| `GateDecision(verdict=GateVerdict.BLOCK, reason=...)` | 立即短路 chain；conclude 失败；reason 文本回送 LLM |
+| `GateDecision(verdict=GateVerdict.ALLOW)` | 显式放行本 gate（chain 内其它 gate 仍评估；多 gate AND 关系） |
+| `GateDecision(verdict=GateVerdict.DEFER)` | 暂时无判决（不命中本 gate 责任域；让 chain 后续 gate 决定） |
+
+**完整端到端 demo**：见 cookbook `examples/cookbook/data-analyst/data_analyst_plugin.py:PIIDetectorGate`
++ `OutputPathGate` —— 同一 agent 注册 2 个 GatePlugin 演示合规审计场景。
 
 ### 5.3 EventListenerPlugin（审计 / metric）
 
