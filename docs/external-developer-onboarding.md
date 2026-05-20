@@ -17,16 +17,18 @@
 
 ### Step 2: 装 SDK（公开包 + 私有 runtime）
 
-> **当前发布状态**（2026-05-16）：
-> - ✅ `krow-agent-sdk==0.8.12.5` 已发 PyPI 主站 → 直接 `pip install krow-agent-sdk`
-> - 🚀 私有 runtime wheel + `krow-sdk-install` CLI 处于 M9 v2 reverse-proxy **W1-W4 实施中**（与 Cloud team 协议锁定，详 [`runtime-install.md`](./runtime-install.md) + [`roadmap.md`](./roadmap.md)）
+> **当前发布状态**（2026-05-19 W5 closeout）：✅ **PyPI 三件套全齐 + 一行装齐**：
+> - ✅ `krow-agent-sdk==0.8.12.11` 已发 PyPI 主站
+> - ✅ `krow-sdk-install==0.8.12.11` 已发 PyPI 主站（W5 首发）
+> - ✅ `krow-agent-sdk-runtime` 0.8.12.10 在 prod TOS（W4 closeout）；0.8.12.11 prod publish 进行中
+> - ✅ 三 cookbook real LLM E2E **多次 stable PASSED**（W5 user-value oriented + 5 P0 bug 治本）
 >
-> **现阶段外部开发者**：可写 plugin + 用 `LLMReplayStore` record/replay 跑单元测试；`agent.run()` 真实跑需等 M9 完成（预计 2026-06）。
+> 详见 ``CHANGELOG_v0.8.12.11.md` (internal design doc)` + ``v0.8.12.11-readiness-status.md` (internal design doc)`。
 
-#### 推荐：一行 PyPI 装机
+#### 推荐：一行 PyPI 装机（公开 SDK + install CLI）
 
 ```bash
-pip install krow-agent-sdk
+pip install krow-agent-sdk krow-sdk-install
 # 或带 extras：
 pip install "krow-agent-sdk[office,visual,knowledge,remote]"
 # 全装：
@@ -36,7 +38,7 @@ pip install "krow-agent-sdk[all]"
 #### Collaborator 模式：monorepo 直装（仅 Krow team collaborator）
 
 ```bash
-git clone https://github.com/aullik5/krow.git
+# (内部 monorepo 私有；外部开发者请用 pip install)
 cd krow
 python -m venv .venv
 .venv\Scripts\activate           # Windows
@@ -44,14 +46,15 @@ python -m venv .venv
 pip install -e ".[sdk]"
 ```
 
-#### M9 完成后：runtime wheel 装机
+#### 装私有 runtime wheel（一行）
 
 ```bash
-# 1. 装公开 SDK
-pip install krow-agent-sdk
-
-# 2. 装私有 runtime wheel（M9 完成后；用你的 KROW_API_KEY 通过 Krow Cloud 反向代理拉 wheel）
-krow-sdk-install --api-key $KROW_API_KEY
+# 用你的 KROW_API_KEY 通过 Krow Cloud 反向代理拉 wheel
+export KROW_API_KEY=sk-user-xxxxxxxxxxxxxxxxxxxxx
+krow-sdk-install
+# → 拉 prod gateway simple index → 选 host-compatible wheel → sha256 校验 → pip install
+# → 装上 runtime + 100+ 依赖（reportlab/pdfplumber/matplotlib/pymupdf 等）
+# → agent.run("...") 真实跑通
 # 详细机制见 runtime-install.md（v2 reverse-proxy）
 ```
 
@@ -451,6 +454,26 @@ jobs:
 - 你公司有 MCP server？用 `MCPServerPlugin` form-A/B/C 三种形态接入
 - 完整范例 → [`api-reference.md`](./api-reference.md) §5.7 + [`quickstart.md`](./quickstart.md) §4 (MCP 三形态简表)
 
+### 路径 E：自定义 Cloud endpoint（staging / 私有部署 / 本地 mock）
+
+99% 用户**不用看**这一节 — 默认走 `https://api.krow.cn` 就 OK。
+
+需要切走时（pilot 联调 / 私有化部署 / 自动化测试）调 `with_base_url(url)`：
+
+```python
+agent = (
+    AgentBuilder()
+    .with_krow_api_key("pk-pilot-xxx")               # SDK pilot key 仅 staging 可用
+    .with_base_url("https://api-staging.krow.cn")    # 切到 staging gateway
+    .with_project_root("/data/x")
+    .build()
+)
+```
+
+格式校验（违反任一抛 `InvalidKrowBaseURLError`）：必须 `https://` 前缀；禁尾斜杠；禁含 path 段（如 `/v1`）；禁空字符串。
+
+完整说明：[`api-reference.md` §2.4 `with_base_url`](./api-reference.md#22-工厂方法) + [`quickstart.md` §6.1](./quickstart.md#61-自定义-cloud-endpointstaging--私有部署--自动化测试)。
+
 ---
 
 ## 常见问题（Troubleshooting 索引）
@@ -480,7 +503,8 @@ jobs:
 | 现象 | 常见原因 | 修法 |
 |---|---|---|
 | `KrowQuotaExceededError` (HTTP 402) | 余额不足 | krow 客户端充值 |
-| `LLMProviderError` (401) | API key 失效 | 重新创建 |
+| `LLMProviderError` (401) | API key 失效 / `pk-pilot-` key 调了 prod endpoint | 重新创建 sk-；或调 `with_base_url("https://api-staging.krow.cn")` |
+| `InvalidKrowBaseURLError` | `with_base_url(url)` 格式不符 | URL 必须 `https://...`；不能尾斜杠；不能含 `/v1` 等 path 段 |
 | LLM 调用很慢但没报错 | 速率限制 / 后端排队 | 看 krow 客户端的"配额状态" |
 | 余额一夜被烧光 | plugin 死循环调 LLM / `BudgetController` 没设硬上限 | 加 `BudgetController` 限制 |
 

@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-contract-auditor"
+version = "0.1.0"
+description = "Krow SDK Cookbook v3 · 合同审阅 demo（条款切分 + 风险评分 + redline + OpenTelemetry）"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "krow-agent-sdk>=0.8.12.5",
+    # PDF / docx 抽取
+    "pdfplumber>=0.10",
+    "python-docx>=1.0",
+]
+
+[project.optional-dependencies]
+# 注：风险报告 PDF 输出**复用** Krow 内置 word_smart_export 工具（SSOT），
+# 不需要在本 cookbook 加 fpdf2 / reportlab 等依赖。
+# OpenTelemetry 可选：未装则 ObservabilityPlugin 自动降级 stdout。
+otel = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp>=1.20",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "contract_auditor_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "contract_auditor_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+    "tests/**",
+    "pyproject.toml",
+    ".gitignore",
+]

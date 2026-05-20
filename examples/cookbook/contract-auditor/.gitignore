@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Demo runtime outputs (never commit)
+output/
+*.audit.jsonl
+risk_report.md
+risk_report.docx
+risk_report.pdf
+
+# Sample contracts（受保密 / 商业敏感性约束，不可提交）
+sample_data/*.docx
+sample_data/*.pdf
+sample_data/*.doc
+
+# Local env
+.env
+.env.*
+*.local
+
+# IDE
+.idea/
+.vscode/

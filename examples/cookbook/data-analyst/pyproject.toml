@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-data-analyst"
+version = "0.2.0"
+description = "Krow SDK cookbook · data-analyst v2 demo (auditor scope: 合规审计 + 异常检测 + 守门 + 预算)"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    # 公开 SDK（pure Python，由 cookbook 依赖；真实跑 agent.run() 需另装 runtime）
+    "krow-agent-sdk>=0.8.12.5",
+    "pandas>=2.0",
+]
+
+[project.optional-dependencies]
+# 注：PDF 输出**复用 Krow 内置 word_smart_export 工具**（SSOT），
+# 不需要在本 cookbook 加 fpdf2 / reportlab 等 PDF 库依赖。
+# 详见 data_analyst_plugin.py §1.7 注释 + ext_data_analyst.md §6 step 6。
+#
+# v2 升级：data_analyst_detect_anomalies(method='isolation_forest') 需 sklearn；
+# IQR / z-score 走纯 pandas 不需此依赖。把 sklearn 放 optional 让用户按需装。
+ml = [
+    "scikit-learn>=1.3",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "data_analyst_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "data_analyst_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+    "tests/**",
+    "pyproject.toml",
+    ".gitignore",
+]

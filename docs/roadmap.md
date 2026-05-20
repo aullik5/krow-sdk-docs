@@ -64,6 +64,14 @@
 - ✅ `0.8.12.5` 已发（2026-05-16）：`pyproject.toml [project.urls]` 修指公开文档仓 + 公开文档完善（advanced-development-guide / api-reference 上线）
 - ✅ `0.8.12.6` 已发（2026-05-16）：公开文档全审查 + 30 个 doc-drift 单测 + 3 个真实 LLM E2E (`with_<cat>_model` + `run_stream`) + lint_subpackage_invariants 19 项 v2 reverse-proxy 关键词守门
 - 🚀 `0.8.12.7` 准备发（2026-05-17）：M9 W1-W4 SDK 侧实施完整交付（W1 测试 wheel + W3 install-cli 子包 + Pilot onboarding + W4 真实 LLM E2E 预期结果卡 + 9 测试 nightly 收）
+- ✅ `0.8.12.10` 已发（2026-05-18）：**W3 W4 收尾大版本**（详 §"v0.8.12.10 交付清单" 一节）
+  - **Cookbook v3 三 demo 落地**（PR #365 / #367 / #369 + recovery PR #377）：financial-analyst（财经研究 / 横向年报对比）+ literature-reviewer（学术研究 / 多 PDF 文献综述）+ contract-auditor（行政办公 / 合同审阅 + 强阻断 Gate + OpenTelemetry），覆盖 SDK 全部 6 类 production plugin
+  - **Cookbook 真实 LLM E2E framework**（PR #378）：`_journey_e2e_helpers.py`（synthesize_*_pdf / run_journey / assert_journey）+ 5 cookbook journey runner + 多维断言 YAML 契约（exit_code / max_walltime_s / required_artifacts / required_sections_in / forbidden_keywords_in / min_artifact_bytes）
+  - **`pk-pilot-` key 双前缀支持**（PR #378）：`API_KEY_PATTERN` 正则升级 + 新增 4 个单测 + `InvalidKrowAPIKeyError` 文案对齐
+  - **W3 cloud-handoff 落地**（PR #372）：HK transit bucket（cn-hk-staging）+ CRR 同步 + multipart upload + 9 wheel 并行上传（`xargs -P 9`），TOS upload 路径稳定
+  - **PPTX Cython hotfix**（PR #376）：`pptx_studio/tools.py` `local logging` 引用前赋值 → 替换为 top-level `logger`（main 上预存 Cython 编译错误，hotfix 解锁 sdk-runtime build）
+  - **Tier 7 wheel slim**（PR #375）：`scripts/audit_sdk_runtime_wheel.py`（HARD/SOFT 双闭包 BFS 扫描）+ `WHEEL_EXCLUDE_LIST` 排除 9 dirs / 72 .py（extensions/, update/, ui/, chat/, monitoring/, graphql/, grpc/ 用户确认 + 3 dirs 由扫描判定 unreachable；formula/ 与 mcp/ 保留）+ Linux strip 后实测：438 MB → 76 MB（**5.7× 缩减**）；macOS 123 MB → 110 MB（1.1× 缩减）；Windows 53 MB（已默认无 debug symbols）
+  - **docs 同步**（PR #379）：cookbook v3 / cookbook E2E results / Tier 7 wheel slim 进 SDK 文档主索引；`README.md` v1.2 + 新增 `cookbook-e2e-results.md`
 - 🚧 EULA v1.1 仍为 DRAFT（good-faith disclosure）；等真律师签字 → v1.x EFFECTIVE → 移除 disclosure
 - 🚀 M9 runtime 上线工作（v2 reverse proxy 4 周 W1-W4 实施中 · 2026-05-16 协议锁定）
 
@@ -108,14 +116,45 @@
 - ✅ Step 2 P1（`with_default_model`→6 个 `with_<cat>_model`（chore/sdk-model-selection-api 2026-05-15）/ `with_replay_store` / `MCPServerPlugin` form-C）全部完成
 - ✅ Step 2 P1 `Agent.run_stream()` 流式 API（PR #316，2026-05-15）：`StreamItem` envelope + 同步生成器 + 20 unit tests + CI smoke 防回归
 - ✅ Step 2 P2 visual_inspect plugin 完整公开（PR #239，2026-05-13）
-- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详 [`eula-mock-legal-review-feedback.md`](./eula-mock-legal-review-feedback.md)
+- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详 ``eula-mock-legal-review-feedback.md` (internal design doc)`
 - 🚧 Step 2 P2 EULA 后续阻塞：(a) 商务决策 3 项（governing law / liability floor / consent 机制 mandatory level）；(b) 持证律师签字（建议中国大陆 + 香港双 review，~14 天）；(c) Cloud 端 + CLI 端同意机制实施
 - 🚧 Step 2 P2 剩余：`domain pack ontology editor + custom entity 抽取`；视外部团队反馈优先度决定开工时机
 - ❌ Step 2 BYO LLM provider 已决策不做（见上表注释）
 
 **当前阻塞 / 后续节点**：
 
-- ✅ PyPI 主站已稳定迭代（`0.8.12.5` 已发）；EULA 仍处 v1.1 DRAFT（good-faith disclosure）
+- ✅ PyPI 主站已稳定迭代（`0.8.12.10` 已发）；EULA 仍处 v1.1 DRAFT（good-faith disclosure）
 - 🚧 EULA v1.x EFFECTIVE：等真律师签字（建议中国大陆 + 香港双 review，~14 天），预计 **2026-06-19 (T+35)** 可达成；签字后下版 hotfix 发布移除 disclosure
 - 🚀 M9 runtime W1-W4 上线节奏：W1 = 2026-05-17 周 / W4 = 2026-06；2026-05-17 决策：跳过封闭 Pilot，直接 Public Beta（任何 KROW_API_KEY 即可装）
 - ✅ 公开文档完整：quickstart / external-developer-onboarding / runtime-install / advanced-development-guide / api-reference / roadmap / EULA 7 份对外文档同步自 monorepo
+- 🚧 Cookbook 真实 LLM E2E real-run blocked：staging gateway LLM 端 **未部署**（pk-pilot- key 走 staging 时 `AuthExpiredError`），需 Cloud team 部署 staging gateway 的 LLM proxy 后才能跑真实 LLM；framework + skip 行为已落地（local 上跑需 prod sk- key + `KROW_REAL_LLM_E2E=1`）
+- ✅ **2026-05-19 W4 self-side followups（PR #384）已合**：`AgentBuilder.with_base_url(url)` API + `tests/sdk/test_cloud_runtime_proxy_acceptance.py` §8 F1-F13 骨架（13+1 case，等 prod gateway 一键跑）+ `sdk-cookbook-smoke.yml` matrix 扩 v3 三 demo + `sdk-install-cli-publish.yml` 独立发布 workflow（待 release engineer 配 OIDC trusted publisher 后即可发 PyPI）
+
+---
+
+## v0.8.12.10 交付清单（2026-05-18）
+
+> 详细变更摘要见 `config/version.py` `VERSION_HOTFIX = 10` 注释段。
+
+| # | 子任务 | PR | 状态 |
+|---|---|---|---|
+| 1 | Cookbook v3 PR-A（financial-analyst）| #365 | ✅ |
+| 2 | Cookbook v3 PR-B（literature-reviewer）| #367 | ✅ |
+| 3 | Cookbook v3 PR-C（contract-auditor）| #369 | ✅ |
+| 4 | Cookbook v3 #367 #369 squash race recovery（cherry-pick）| #377 | ✅ |
+| 5 | W3 cloud-handoff（HK transit + CRR + multipart + parallel upload）| #372 | ✅ |
+| 6 | PPTX Cython hotfix（main 上预存编译错误）| #376 | ✅ |
+| 7 | Cookbook E2E framework + pk-pilot- key 支持 | #378 | ✅ |
+| 8 | docs/sdk: cookbook v3 + E2E + Tier 7 同步 | #379 | ✅ |
+| 9 | sdk-runtime Tier 7 wheel slim + version 0.8.12.10 | #375 | ✅ |
+| 10 | docs/sdk v0.8.12.10 changelog + roadmap 更新 + GitHub release | #381 | ✅ |
+| 11 | v0.8.12.10 readiness 诚实盘点 + W4 Cloud team 需求文档（C1-C8） | #382 | ✅ |
+| 12 | W4 self-side followups — cookbook smoke v3 + with_base_url + acceptance skeleton + install-cli publish | #384 | ✅ |
+
+**Tier 7 wheel slim 实测（run 26056951348, 9 platforms, strip 后）**：
+
+| platform | strip 前 | strip 后 | reduction |
+|---|---|---|---|
+| ubuntu-3.11/3.12/3.13 | 438 / 421 / 419 MB | **76 / 71 / 71 MB** | **-82.5% ~ -83.0%** |
+| macos-3.11/3.12/3.13 | 123 / 122 / 121 MB | **111 / 111 / 110 MB** | **-9% ~ -10%** |
+| windows-3.11/3.12/3.13 | 53 / 52 / 52 MB | 53 / 52 / 52 MB | 0%（已默认无 debug symbols）|

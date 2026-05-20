@@ -1,0 +1,142 @@
+# literature-reviewer Tier 1 最小跑（合成 2 篇 paper PDF, 主题聚类 + 综述初稿）
+#
+# 跑法：python main.py <p1.pdf> <p2.pdf> --quiet
+#
+# 用户价值优先（W5 重写 · 2026-05-19）
+# ════════════════════════════════════════
+#
+# 学术综述对用户（研究生 / 研究员）的核心价值：
+#   1. 综述必须**引用具体论文**（用 paper 标题 / 简称 / 编号 引用）→ keywords
+#   2. 综述必须**结构化**（引言 / 方法 / 结论）→ ``markdown_structure``
+#   3. 综述必须**对比两篇 paper 的关系**（聚类后必须输出 differ/shared 等关系）→ ``must_address``
+#   4. 综述**不能编造作者 / 数据**（paper 输入的 5.2% / 8.5% Hit@10 应保留）→ grounding
+#   5. 综述**不能鬼打墙**（重复段落 = 用户体验灾难）→ ``max_repeated_paragraphs``
+#
+# 输入数据（来自 test_literature_reviewer_journey_e2e.py）
+# ═══════════════════════════════════════════════════════
+#   paper1: "Towards Graph Neural Networks for Recommendation"
+#           Alice Wang / Bob Liu, MovieLens-1M / Amazon-Books, 8.5% over BPR-MF
+#   paper2: "Self-Supervised Contrastive Learning for Sequence Models"
+#           Charlie Zhang / Diana Chen, 5.2% Hit@10 over SASRec
+#   refs:   [1] Smith et al., ICLR 2023; [2] Liu and Zhang, NeurIPS 2022
+#
+# W5 实测调整（2026-05-19）：
+#   - LLM 实际综述用 paper 标题 / 简称（"GNN-Rec" / "Contrastive-Seq"）
+#     而不是 [1]/[2] 编号 → keywords 接受标题片段
+#   - LLM 用 "complementary / different" 表达对比关系（不一定写"对比/比较"）
+
+exit_code: 0
+max_walltime_s: 800
+
+required_artifacts:
+  - literature_review.md
+
+min_artifact_bytes:
+  literature_review.md: 1500
+
+# ──────────────────────────────────────────────────
+# 维度 1（功能可用性）：必含核心学术词
+# ──────────────────────────────────────────────────
+required_keywords_in:
+  literature_review.md:
+    # 必须提及主题领域（任一）
+    - ["graph neural network", "图神经网络", "GNN", "图网络"]
+    - ["contrastive", "对比学习", "对比", "self-supervised", "自监督"]
+    # 必须含引用形式（标题 / 简称 / 编号 任一）
+    - ["[1]", "[2]", "(Smith", "(Liu", "(Wang", "GNN-Rec", "Contrastive-Seq",
+       "Graph Neural Networks for Recommendation",
+       "Contrastive Learning for Sequence"]
+
+# 学术综述禁止主观夸大词
+forbidden_keywords_in:
+  literature_review.md:
+    - "举世闻名"
+    - "前所未有的成就"
+    - "彻底颠覆"
+
+# 章节灵活：综述可以"导论 / 引言 / Introduction" 任一
+required_sections_in:
+  literature_review.md:
+    - ["引言", "Introduction", "导论", "概述", "Overview", "背景"]
+    - ["方法", "Method", "Methodology", "方法论", "技术路线", "技术方法"]
+
+# ──────────────────────────────────────────────────
+# 维度 2（数据 grounding · W5 升级 · 用户价值）
+# 综述必须引用至少一篇 paper 的具体实验数据 — 学术综述的核心价值之一
+# 用 must_address.具体数据 维度（OR 5.2%/8.5%）替代严格 numeric_grounding，
+# 因为 LLM 风格漂移：有时引 paper1（8.5%）有时引 paper2（5.2%）.
+# ──────────────────────────────────────────────────
+# numeric_grounding 已合并到 must_address.具体数据 — 见下方
+
+# ──────────────────────────────────────────────────
+# 维度 3（markdown 结构 · W5 新增）
+# ──────────────────────────────────────────────────
+markdown_structure:
+  literature_review.md:
+    # 综述至少 3 段（实测 LLM 输出 9 段：Abstract/Intro/Background/Methodology/...
+    # /Conclusion/References + 图谱洞察）
+    min_h2_sections: 3
+    no_duplicate_h2: true
+
+# ──────────────────────────────────────────────────
+# 维度 4（用户决策问题 · W5 新增）：综述必须明确两篇 paper 关系
+# ──────────────────────────────────────────────────
+must_address:
+  literature_review.md:
+    # 综述必须比较两篇 paper（聚类后输出关系）— W5 实测 LLM 用
+    # "complementary" / "different" 表达，不一定写中文"对比"
+    - question: "论文对比 / 主题关系"
+      any_keywords:
+        - "对比"
+        - "比较"
+        - "异同"
+        - "区别"
+        - "共同"
+        - "differ"
+        - "different"
+        - "shared"
+        - "relationship"
+        - "complementary"
+        - "similar"
+        - "互补"
+        - "differs from"
+        - "in contrast"
+    # 综述必须有"局限/讨论/未来工作"等深入分析（任一即可）
+    - question: "未来工作 / 局限性 / 讨论"
+      any_keywords:
+        - "未来"
+        - "展望"
+        - "future work"
+        - "future research"
+        - "open problem"
+        - "open challenge"
+        - "尚待"
+        - "进一步研究"
+        - "下一步"
+        - "limitation"
+        - "Limitation"
+        - "局限"
+        - "discussion"
+        - "Discussion"
+        - "讨论"
+    # 至少一篇 paper 的具体实验数据 — 学术综述的核心价值（防 LLM 写空泛叙事）
+    # paper1: 8.5% over BPR-MF / paper2: 5.2% Hit@10 over SASRec
+    - question: "具体实验数据（任一 paper 的改进数字）"
+      any_keywords:
+        - "5.2%"
+        - "5.20%"
+        - "5.2 percent"
+        - "8.5%"
+        - "8.50%"
+        - "8.5 percent"
+        - "Hit@10"
+        - "MovieLens"
+        - "Amazon-Books"
+        - "BPR-MF"
+        - "SASRec"
+
+# ──────────────────────────────────────────────────
+# 维度 5（重复段落检测 · W5 新增）
+# ──────────────────────────────────────────────────
+max_repeated_paragraphs:
+  literature_review.md: 0
