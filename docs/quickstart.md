@@ -108,6 +108,11 @@ ENV KROW_API_KEY=sk-user-...
 
 镜像构建期会跑 `python scripts/validate_sdk_install.py` 9 项 smoke 检查，确保 SDK 公共 API 在 Linux container 内 import 链完整。
 
+> **生产部署完整指南** → [`headless-deployment.md`](./headless-deployment.md) ✨：覆盖 3 种部署
+> 形态（`python:slim` 自建 / 官方镜像扩展 / 现有 ML 镜像加装）、K8s `restricted` PSA 兼容
+> Deployment 模板、`KROW_DATA_DIR` 一等公民配置（0.8.12.15+）、SIGTERM 优雅关闭、9 个常见
+> 故障排查。
+
 ---
 
 ## 2. Hello World：30 行代码跑通真实 LLM（2 分钟）

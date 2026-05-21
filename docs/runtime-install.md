@@ -182,13 +182,29 @@ finally:
 
 ### Q1: 跑 ``krow-sdk-install`` 报 ``❌ Krow API key 校验失败 (HTTP 401)``
 
-**原因**：API key 错或被撤销.
+**原因**：API key 错 / 被撤销 / 旧版 SDK 不识别新格式.
 
 **修法**：
 
-1. 检查 key 拼写（注意首尾空格 / 引号）
-2. 到 https://krow.cn/dashboard 查 key 状态
-3. 如已撤销 → 生成新 key
+1. **首先确认 SDK 版本**（2026-05-20 起 Krow Dashboard 升级到 **48 位 user key**
+   格式 `sk-user-` + 40 字符）：
+   ```bash
+   pip install -U "krow-sdk-install>=0.8.12.12" "krow-agent-sdk>=0.8.12.12"
+   ```
+   - `krow-sdk-install` 0.8.12.12 起：用 PEP 425 wheel matching，48 位 key 长度
+     不影响 install 路径（CLI 端只透传 Bearer token，不做长度校验）
+   - `krow-agent-sdk` 0.8.12.12 起：`API_KEY_PATTERN` 正则
+     `^(sk-[A-Za-z0-9_\-]{17,}|pk-pilot-[A-Za-z0-9_\-]{17,})$` 接受 ≥ 20 字符的
+     `sk-` / `pk-pilot-` 前缀 key，48 位 user key 完全兼容
+
+2. 到 [https://krow.cn/dashboard](https://krow.cn/dashboard) **重新生成** API key
+   （旧 dashboard 生成的短格式 key 在 cloud 端 sk auth 升级后已失效；
+   2026-05-20 起请用 dashboard 生成的 48 位 user key）
+
+3. 检查 key 拼写：注意首尾空格 / 引号 / 截断（`sk-user-` 前缀 + 40 字符 = 48 字符整）
+
+4. 如以上都查过仍 401：联系 [support@krow.cn](mailto:support@krow.cn) 带上响应
+   header 里的 `X-Request-Id`
 
 ### Q2: 跑 ``krow-sdk-install`` 报 ``402 InsufficientBalance``
 
