@@ -1,0 +1,58 @@
+# knowledge-wiki Tier 1 最小跑（3 篇光伏资料 → 本体 + wiki 词条）
+#
+# 跑法：python main.py sample_data/ --project-dir kb --output-dir output
+#
+# 用户价值优先
+# ════════════
+# 知识编译对用户的核心价值：
+#   1. 真的抽出了**本体**（概念 + 实体）→ ontology_snapshot.json 的 key_node_count（test 自定义断言）
+#   2. 真的生成了**可浏览的 wiki 词条**（不是只抽本体不写页）→ wiki_page_count（test 自定义断言）
+#   3. 词条**有领域内容**（不是空壳）→ compile_report.md 含光伏领域词
+#   4. **覆盖核对**报告完整（本体↔wiki 交叉）→ compile_report.md 结构
+#
+# 输入数据（自带 sample_data/ 3 篇）
+# ═══════════════════════════════════
+#   01_solar_pv_principles.md      概念：光伏效应 / PN结 / 转换效率
+#   02_solar_pv_components.md       实体：单晶硅电池板 / 逆变器 / MPPT控制器 / 储能电池
+#   03_grid_and_storage_comparison.md  对比：单晶vs多晶 / 集中式vs分布式 / 并网vs离网
+#
+# 注：compile_report.md 是 cookbook 确定性生成（report_wiki_coverage），
+# 内含从真实 wiki 词条读出的 title，所以"领域词命中"= 真的写了相关词条。
+# 本体/wiki 计数的硬下界由 test 自定义断言（读 ontology_snapshot.json + 扫 .krow/wiki）。
+
+exit_code: 0
+
+# 编译是长任务（逐文件 LLM 抽本体 + LLM 关系，thinking 模型偶发 <think>
+# 截断需重试，故留足余量）。样本只有 3 篇小资料。
+max_walltime_s_serial: 2400
+max_walltime_s_parallel: 3000
+
+required_artifacts:
+  - compile_report.md
+  - ontology_snapshot.json
+
+min_artifact_bytes:
+  compile_report.md: 400
+
+# ──────────────────────────────────────────────────
+# 维度 1（结构 + 领域内容）：验收报告完整 + 词条含光伏领域词
+# ──────────────────────────────────────────────────
+required_keywords_in:
+  compile_report.md:
+    - "知识编译验收报告"
+    - "本体统计"
+    - "wiki 页总数"
+    - "覆盖率"
+    - "已生成词条"
+    # 领域内容证明：wiki 词条 title 里至少含一个光伏领域词（OR）
+    # 证明 LLM 真的为领域概念/实体建了词条，不是空壳
+    - ["光伏", "逆变器", "单晶硅", "多晶硅", "PN结", "PN 结", "MPPT",
+       "储能", "电池板", "转换效率", "薄膜电池", "能带"]
+
+# ──────────────────────────────────────────────────
+# 维度 2（markdown 结构）：报告分章节
+# ──────────────────────────────────────────────────
+markdown_structure:
+  compile_report.md:
+    min_h2_sections: 3
+    no_duplicate_h2: true

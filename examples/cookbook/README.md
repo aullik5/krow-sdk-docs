@@ -14,8 +14,9 @@
 | 2 | **financial-analyst** | [`financial-analyst/`](./financial-analyst/) | 上市公司年报横向对比 + 投资简报 + Prometheus | ⭐⭐⭐ | 6 类 plugin 全用（含 ObservabilityPlugin Prometheus）+ BudgetSpec |
 | 3 | **literature-reviewer** | [`literature-reviewer/`](./literature-reviewer/) | 多 PDF 文献综述（主题聚类 + 章节生成 + 抄袭检测） | ⭐⭐⭐ | 5 类 plugin（CitationCompletenessGate / PlagiarismGate 等）+ BudgetSpec |
 | 4 | **contract-auditor** | [`contract-auditor/`](./contract-auditor/) | 合同审阅（强阻断 Gate + OpenTelemetry tracing） | ⭐⭐⭐⭐ | 6 类 plugin 全用（含 ObservabilityPlugin OpenTelemetry） |
+| 5 | **knowledge-wiki** | [`knowledge-wiki/`](./knowledge-wiki/) | 一批资料 → 结构化知识库（本体 Ontology + 可浏览互链百科词条 wiki） | ⭐⭐⭐⭐ | ToolPlugin × 5（扫描 / 抽取 / 关系 / 物化 / 覆盖核对）· ACTPlugin · GatePlugin（WikiCoverageGate 防"假编译"）· EventListenerPlugin（三阶段进度）+ BudgetSpec |
 
-> 4 个 cookbook 共演示 SDK 全部 6 类 production plugin（ACTPlugin / ToolPlugin / HintPlugin / GatePlugin / EventListenerPlugin / ObservabilityPlugin）+ BudgetSpec 预算硬约束。
+> 5 个 cookbook 共演示 SDK 全部 6 类 production plugin（ACTPlugin / ToolPlugin / HintPlugin / GatePlugin / EventListenerPlugin / ObservabilityPlugin）+ BudgetSpec 预算硬约束。knowledge-wiki 额外演示 **System 1 确定性流水线编排 + System 2 单发 LLM**：知识编译走"扫描 → 逐文件抽取 → 关系推断 → wiki 物化 → 覆盖验收"五步确定性流程，而非易空转的巨型 macro-ReACT。
 
 ---
 
@@ -73,6 +74,7 @@ pytest tests/test_*_smoke.py -v
 | literature-reviewer | 引言 / 方法 / 参考文献 + ≥1.5 KB + 学术夸大词禁用 |
 | contract-auditor | 5 段审阅结构 + 含"免责"风险识别 + ≥1 KB |
 | data-analyst | 数据摘要 + 异常 + 相关性段 + ≥500 字节 |
+| knowledge-wiki | ontology 节点数 ≥ 阈值 + wiki 词条数 ≥ 阈值 + 词条含 YAML frontmatter + `compile_report.md` 含领域关键词 |
 
 ---
 

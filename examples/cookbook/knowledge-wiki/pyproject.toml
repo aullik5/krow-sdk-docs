@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-knowledge-wiki"
+version = "0.1.0"
+description = "Krow SDK Cookbook · 知识编译 + wiki 编译 demo（一批资料 → 本体 Ontology + 百科词条）"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "krow-agent-sdk>=0.8.12.5",
+    # ontology 管线（wiki 编译中文分词 jieba + 图分析 networkx）
+    "krow-agent-sdk[ontology]>=0.8.12.5",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+    # journey_e2e expected_card 读取需要 PyYAML（_journey_e2e_helpers.py:load_expected_card）
+    "PyYAML>=6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "knowledge_wiki_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "knowledge_wiki_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+    "tests/**",
+    "pyproject.toml",
+    ".gitignore",
+]

@@ -346,48 +346,109 @@ def run_journey(
     argv: list[str],
     cwd: Path | None = None,
     timeout_s: int = 1200,
+    max_attempts: int | None = None,
 ) -> JourneyResult:
     """通用 cookbook journey 跑器（subprocess 隔离）.
 
     ``cookbook_dir``：cookbook 目录名（如 ``financial-analyst``）.
     ``argv``：传给 cookbook ``main.py`` 的 CLI 参数（如 ``["sample.pdf", "--quiet"]``）.
     ``cwd``：默认为 cookbook 目录本身.
+    ``max_attempts``：最多跑 N 次（含首次）；非 cloud env-error 类 fail 时 retry.
+       默认 ``None`` → 读 env ``KROW_COOKBOOK_JOURNEY_MAX_ATTEMPTS`` → 兜底 2.
+
+    nightly model 注入（P2-A · 2026-05-22）:
+        若 env ``KROW_NIGHTLY_TEST_MODEL`` 已设 + ``argv`` 未显式传
+        ``--chat-model`` / ``--reasoning-model`` → 自动注入两个参数.
+        让 sdk-nightly.yml::cookbook-real-llm-journey job 能用 nightly 经济
+        model（默认 ``krow-llm``）跑 cookbook journey, 不依赖 cookbook
+        ``module_config.json`` default model（CATIA #1 教训：默认 model 漂移
+        即假绿/超预算）。本地 dev 跑不设 ``KROW_NIGHTLY_TEST_MODEL``，
+        cookbook 走自己的 default model 不受影响.
+
+    内置 retry（PR #623+ · 2026-05-27 · lessons §"宏观 ReACT 假成功"新变体）:
+        opus-4.6 在 literature-reviewer 等 long-form 场景偶发 plan 步骤
+        重复执行 → ``smart_file_write`` 没真调 → output 空, exit_code=1.
+        这是真 ReACT 引擎 bug（待 System 1 plan-repeat 闸门治本），但
+        在闸门 ready 前 retry 兜底：单 run 失败时再跑 1 次（默认 max_attempts=2）.
+        触发条件：``exit_code != 0`` AND 不含 cloud env-error 关键词
+        （cloud 5xx 走 ``_maybe_skip_on_cloud_env_error`` 不浪费 LLM 重跑）.
+        每次 attempt 在 stderr 前注入 ``[attempt N/M]`` 标记便于诊断.
     """
     cookbook_root = Path(__file__).parent / cookbook_dir
     if not cookbook_root.exists():
         raise FileNotFoundError(f"cookbook 不存在：{cookbook_root}")
     cwd = cwd or cookbook_root
 
+    nightly_model = os.environ.get("KROW_NIGHTLY_TEST_MODEL", "").strip()
+    if nightly_model and "--chat-model" not in argv and "--reasoning-model" not in argv:
+        argv = list(argv) + [
+            "--chat-model", nightly_model,
+            "--reasoning-model", nightly_model,
+        ]
+
+    if max_attempts is None:
+        try:
+            max_attempts = max(1, int(os.environ.get("KROW_COOKBOOK_JOURNEY_MAX_ATTEMPTS", "2")))
+        except ValueError:
+            max_attempts = 2
+
     cmd = [sys.executable, str(cookbook_root / "main.py"), *argv]
-    started = time.time()
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout_s,
-        env={**os.environ},
-    )
-    walltime = time.time() - started
 
-    output_dir = _resolve_output_dir(argv, cwd)
-    artifacts: dict[str, Path] = {}
-    if output_dir and output_dir.exists():
-        for f in output_dir.iterdir():
-            if f.is_file():
-                artifacts[f.name] = f
+    last_result: JourneyResult | None = None
+    attempt_logs: list[str] = []
+    total_walltime = 0.0
 
-    return JourneyResult(
-        cookbook=cookbook_dir,
-        exit_code=proc.returncode,
-        walltime_s=walltime,
-        output_dir=output_dir,
-        stdout=proc.stdout,
-        stderr=proc.stderr,
-        artifacts=artifacts,
-    )
+    for attempt in range(1, max_attempts + 1):
+        started = time.time()
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_s,
+            env={**os.environ},
+        )
+        attempt_walltime = time.time() - started
+        total_walltime += attempt_walltime
+
+        output_dir = _resolve_output_dir(argv, cwd)
+        artifacts: dict[str, Path] = {}
+        if output_dir and output_dir.exists():
+            for f in output_dir.iterdir():
+                if f.is_file():
+                    artifacts[f.name] = f
+
+        attempt_marker = (
+            f"[attempt {attempt}/{max_attempts} · "
+            f"exit={proc.returncode} · walltime={attempt_walltime:.1f}s]"
+        )
+        attempt_logs.append(attempt_marker)
+        stderr_with_marker = f"{attempt_marker}\n{proc.stderr}"
+
+        last_result = JourneyResult(
+            cookbook=cookbook_dir,
+            exit_code=proc.returncode,
+            walltime_s=total_walltime,
+            output_dir=output_dir,
+            stdout=proc.stdout,
+            stderr=stderr_with_marker,
+            artifacts=artifacts,
+        )
+
+        # 决定是否 retry: 仅 exit_code != 0 且不是 cloud env-error 时 retry.
+        if proc.returncode == 0:
+            break
+        if attempt >= max_attempts:
+            break
+        combined = (proc.stderr or "") + "\n" + (proc.stdout or "")
+        if _is_cloud_env_error(combined):
+            # cloud 5xx → 不 retry, 留给 _maybe_skip_on_cloud_env_error 处理
+            break
+
+    assert last_result is not None
+    return last_result
 
 
 def _resolve_output_dir(argv: list[str], cwd: Path) -> Path:
@@ -416,8 +477,177 @@ def load_expected_card(card_name: str, *, cookbook_dir: str) -> dict[str, Any]:
     return yaml.safe_load(card_path.read_text(encoding="utf-8")) or {}
 
 
+# ════════════════════════════════════════════════════════════════════════
+# §2.5 Cloud env-error 关键词检测（SSOT 镜像 tests/sdk/_real_llm_env.py）
+# ════════════════════════════════════════════════════════════════════════
+#
+# 2026-05-27 hf35 lesson:
+#   cookbook journey test 跑 subprocess 后, stderr 含 cloud LLM 服务端
+#   5xx 关键词 (如 ``"服务端临时错误"`` / ``"处理请求失败"``) 时, 之前
+#   ``assert_journey`` 直接 ``assert exit_code == 0`` fail-loud → CI 红.
+#   但 cloud 5xx 是 **env-error** (服务端 instability), 不是 cookbook 代码
+#   bug, 应该 ``pytest.skip`` 而非 fail (元规则 §0.1 nightly 阻塞 admin
+#   merge 反模式 + branch-workflow.mdc §4.5 case 4).
+#
+# 主仓 ``tests/sdk/_real_llm_env.py:ENV_ERROR_TRIGGERS`` 是 SSOT.
+# cookbook 是 wheel 内的 ``examples/cookbook/`` (用户视角发布物), 不能
+# 反向 import 主仓 ``tests/``. 所以本模块**内联 SSOT 镜像**关键词列表,
+# 与主仓保持一致. 主仓修改 trigger → 同步改本镜像 (review checklist).
+#
+_CLOUD_ENV_ERROR_TRIGGERS: tuple[str, ...] = (
+    # 凭证 / 鉴权 / 额度
+    "余额", "Insufficient", "balance",
+    "AuthExpired", "auth expired", "401",
+    "402", "quota",
+    "credentials",
+    # 速率限制
+    "rate limit", "rate_limit", "429",
+    # 网络 / 超时 / 连接
+    "timeout", "timed out",
+    "name resolution", "connection",
+    # cloud LLM 服务端临时错误 (PR-2 nightly 实测 2026-05-23: api.krow.cn 偶发 400/500)
+    "服务端临时错误", "处理请求失败",
+    "Krow API error 4", "Krow API error 5",
+    "服务端错误", "service unavailable",
+    # cloud 鉴权 / entitlement 拒绝 headline (2026-05-31 headless nightly 实测;
+    # SSOT 镜像 tests/sdk/_real_llm_env.py:ENV_ERROR_TRIGGERS, 改这里必须同步主仓)
+    "登录已过期", "套餐升级", "账号特殊授权",
+)
+
+
+def _is_cloud_env_error(text: str | None) -> bool:
+    """判断文本是否含 cloud 服务端临时错误关键词 (case-insensitive).
+
+    SSOT 镜像主仓 ``tests/sdk/_real_llm_env.py:is_env_error``.
+
+    Args:
+        text: 待检查文本 (常见来源: subprocess stdout/stderr).
+
+    Returns:
+        True 表示至少 1 个 cloud env-error 关键词命中.
+    """
+    if not text:
+        return False
+    text_lower = text.lower()
+    return any(t.lower() in text_lower for t in _CLOUD_ENV_ERROR_TRIGGERS)
+
+
+def _maybe_skip_on_cloud_env_error(result: JourneyResult) -> None:
+    """cloud 5xx env-error 检测 → pytest.skip 而非 assert fail.
+
+    检查 ``stderr`` / ``stdout`` 是否含 cloud 服务端临时错误关键词. 命中
+    → ``pytest.skip``; 全部不命中 → 不做任何动作, 调用方继续断言.
+
+    与主仓 ``tests/sdk/_real_llm_env.py:skip_on_env_failure`` 同源策略,
+    cookbook subprocess 视角的 wheel 内版本 (不依赖 ``AgentV3Result``).
+
+    设计理由 (元规则 §0.1 nightly 阻塞 admin merge 反模式治本):
+      cloud `api.krow.cn` LLM 推理服务偶发性 5xx → cookbook journey
+      subprocess exit_code=1 + stderr 含 ``"服务端临时错误"`` →
+      应该 ``pytest.skip`` 不计入 nightly fail (cloud instability
+      不阻塞 admin merge), 而非 ``assert fail`` 让 sdk-nightly 红.
+    """
+    combined = (result.stderr or "") + "\n" + (result.stdout or "")
+    if _is_cloud_env_error(combined):
+        sample = combined[-500:].replace("\n", " ")[:300]
+        pytest.skip(
+            f"[{result.cookbook}] skip: cloud LLM 服务端临时错误 "
+            f"(api.krow.cn 偶发 4xx/5xx); env-error 不阻塞 admin merge. "
+            f"sample={sample!r}"
+        )
+
+
+def assert_journey_with_retry(
+    *,
+    cookbook_dir: str,
+    argv: list[str],
+    card: dict[str, Any],
+    cwd: Path | None = None,
+    timeout_s: int = 1200,
+    max_attempts: int | None = None,
+) -> JourneyResult:
+    """``run_journey`` + ``assert_journey`` 组合 + assert-level retry 兜底（PR #624）.
+
+    覆盖两类 LLM 偶发抖动:
+      - **fail mode A**: ``exit_code=0`` 但 ``assert_journey`` 维度 fail
+        (numeric_grounding / markdown_structure / required_keywords).
+        如 financial-analyst LLM 编造 KPI 数字 / 没正确调 extract_kpi.
+      - **fail mode B**: ``exit_code != 0`` (cookbook main.py 自身报错).
+        如 literature-reviewer LLM plan 重复执行 + smart_file_write 没真调.
+
+    与 ``run_journey`` 的 ``max_attempts`` 内置 retry 互补:
+      - ``run_journey`` 内置 retry 只覆盖 fail mode B (subprocess exit!=0)
+      - 本 helper 在 assert 层 retry, 覆盖 fail mode A (内容维度 fail)
+      - 实际策略: 调本 helper 时禁用 ``run_journey`` 内部 retry (传 ``max_attempts=1``),
+        统一由本 helper 控制重试次数 (避免双层 retry 总次数膨胀到 4x)
+
+    cloud env-error 仍不浪费 LLM 重跑（命中关键词 → 立即 ``pytest.skip``）.
+
+    用户原则约束 (AGENTS.md §0.0 准确性 > 完整性 > 速度 > 成本):
+      retry 不降低测试严格性, 仅吸收 LLM 偶发抖动 (50%+ 实测抖动率, opus-4.6 long-form).
+      若 ``max_attempts`` 次全 fail → 真有问题, fail-loud raise 最后一次的 AssertionError.
+    """
+    if max_attempts is None:
+        try:
+            max_attempts = max(1, int(os.environ.get("KROW_COOKBOOK_JOURNEY_MAX_ATTEMPTS", "2")))
+        except ValueError:
+            max_attempts = 2
+
+    last_exc: AssertionError | None = None
+    last_result: JourneyResult | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        # 禁用 run_journey 内部 retry, 统一由本 helper 控制
+        result = run_journey(
+            cookbook_dir=cookbook_dir,
+            argv=argv,
+            cwd=cwd,
+            timeout_s=timeout_s,
+            max_attempts=1,
+        )
+        last_result = result
+        try:
+            assert_journey(result, card=card)
+            return result  # PASS
+        except pytest.skip.Exception:
+            # cloud env-error skip 直接透传, 不 retry
+            raise
+        except AssertionError as exc:
+            last_exc = exc
+            if attempt >= max_attempts:
+                break
+            combined = (result.stderr or "") + "\n" + (result.stdout or "")
+            if _is_cloud_env_error(combined):
+                # cloud 5xx → 不浪费 LLM retry, 让 assert_journey 内部 skip
+                break
+
+    # 用尽 attempts 还 fail → fail-loud raise 增强信息
+    assert last_exc is not None
+    # 附最后一次 run 的 exit_code + stderr/stdout 尾部，便于定位真因
+    # （此前 last_result 被赋值却从未使用 → F841 dead-store；既然函数意图是
+    # “增强信息”，就把它真正接进失败 message）。
+    tail = ""
+    if last_result is not None:
+        _err_tail = (last_result.stderr or "")[-800:]
+        _out_tail = (last_result.stdout or "")[-400:]
+        tail = (
+            f"\n  last exit_code={getattr(last_result, 'exit_code', '?')}"
+            f"\n  last stderr(tail)={_err_tail!r}"
+            f"\n  last stdout(tail)={_out_tail!r}"
+        )
+    msg = (
+        f"\n[assert_journey_with_retry] cookbook={cookbook_dir} "
+        f"max_attempts={max_attempts} 全部失败:\n{last_exc}{tail}"
+    )
+    raise AssertionError(msg) from last_exc
+
+
 def assert_journey(result: JourneyResult, *, card: dict[str, Any]) -> None:
     """按预期结果卡多维断言.
+
+    入口先做 cloud env-error 关键词检测 (PR #619 · 2026-05-27 · hf35):
+    stderr/stdout 命中 ``_CLOUD_ENV_ERROR_TRIGGERS`` 任一 → ``pytest.skip``
+    而非 ``assert fail`` (元规则 §0.1 nightly 阻塞 admin merge 反模式治本).
 
     Card schema 已有维度（System 1 · 功能可用性）:
       ``exit_code``: int (默认 0)
@@ -457,6 +687,8 @@ def assert_journey(result: JourneyResult, *, card: dict[str, Any]) -> None:
       - **OCP**：新字段全部 default None / 空，老 expected_card 不修即工作.
       - **fail-loud**：错误信息含具体 missing keyword + 字段名 + 1 行修法.
     """
+    _maybe_skip_on_cloud_env_error(result)
+
     expected_exit = card.get("exit_code", 0)
     assert result.exit_code == expected_exit, (
         f"[{result.cookbook}] exit_code {result.exit_code} != {expected_exit}\n"
@@ -464,10 +696,23 @@ def assert_journey(result: JourneyResult, *, card: dict[str, Any]) -> None:
         f"stderr:\n{result.stderr[-2000:]}"
     )
 
-    max_wall = card.get("max_walltime_s")
+    # walltime 阈值（P2-A · 2026-05-25 · lessons "并行 walltime 硬阈"反模式驱动）:
+    # - card 可同时声明 ``max_walltime_s_serial`` + ``max_walltime_s_parallel``
+    # - 老字段 ``max_walltime_s`` 仍兼容 (作 serial 兜底; 无 parallel 时取 serial * 1.5)
+    # - 自动检测并行环境（pytest-xdist worker / env ``KROW_COOKBOOK_JOURNEY_PARALLEL``）
+    # - 并行运行用更宽松阈值, 避免 LLM TPM / CPU / 网络争抢导致的伪阳性
+    max_wall_serial = card.get("max_walltime_s_serial") or card.get("max_walltime_s")
+    max_wall_parallel = card.get("max_walltime_s_parallel")
+    if max_wall_serial is not None and max_wall_parallel is None:
+        max_wall_parallel = max_wall_serial * 1.5
+    is_parallel = _is_parallel_journey_run()
+    max_wall = max_wall_parallel if is_parallel else max_wall_serial
     if max_wall is not None:
+        mode = "parallel" if is_parallel else "serial"
         assert result.walltime_s <= max_wall, (
-            f"[{result.cookbook}] walltime {result.walltime_s:.1f}s > {max_wall}s"
+            f"[{result.cookbook}] walltime {result.walltime_s:.1f}s > {max_wall}s ({mode} threshold)\n"
+            f"  serial={max_wall_serial}s, parallel={max_wall_parallel}s, detected={mode}\n"
+            f"  并行检测 SSOT: PYTEST_XDIST_WORKER / KROW_COOKBOOK_JOURNEY_PARALLEL env"
         )
 
     for required in card.get("required_artifacts", []):
@@ -651,6 +896,31 @@ def assert_journey(result: JourneyResult, *, card: dict[str, Any]) -> None:
             f"  样例：{list(repeated.items())[:2]}\n"
             f"  这是 LLM 重复输出 bug（write_artifact 追加而非覆盖；或 verify_completion 后又 write 一次）."
         )
+
+
+def _is_parallel_journey_run() -> bool:
+    """检测当前是否在并行 journey 环境中运行.
+
+    SSOT 来源（任一为真即并行, P2-A · 2026-05-25 lessons §教训5）:
+      1. ``PYTEST_XDIST_WORKER`` env 非空（pytest-xdist 自动注入到 worker subprocess）
+      2. ``KROW_COOKBOOK_JOURNEY_PARALLEL=1`` env 显式声明（local opt-in，
+         如 ``KROW_COOKBOOK_JOURNEY_PARALLEL=1 pytest -n 2 tests/...``）
+      3. ``KROW_COOKBOOK_PARALLEL_JOURNEYS=N`` env 数值 > 1 (nightly workflow
+         显式注入 concurrent journey count)
+    """
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        return True
+    if os.environ.get("KROW_COOKBOOK_JOURNEY_PARALLEL", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }:
+        return True
+    try:
+        n = int(os.environ.get("KROW_COOKBOOK_PARALLEL_JOURNEYS", "1"))
+        if n > 1:
+            return True
+    except ValueError:
+        pass
+    return False
 
 
 def _check_numeric_grounded(

@@ -1,0 +1,84 @@
+name: knowledge_wiki_studio
+display_name: 知识编译工作室（Knowledge & Wiki Studio）
+description: |
+  当用户提供一批领域资料（markdown / txt / PDF / Office）且要"编入百科 / 知识编译 /
+  建知识库 / 抽本体 / 生成词条 / 整理知识"时进入此 ACT。
+  本 ACT 内 Agent 会走知识编译三阶段：
+  - 抽取（extract）：smart_read_document / extract_entities_from_text → GlobalOntology 本体
+  - 关联（relate）：add_relation 补 causal / hierarchical 等关系边
+  - 发布（publish）：wiki_info(get_template) + smart_file_write 写 .krow/wiki/ 词条
+  并用 cookbook 自带的 knowledge_wiki_scan_sources（确定性 ingest 清单）+
+  knowledge_wiki_coverage_report（本体↔wiki 覆盖验收）守住编译质量。
+category: knowledge
+priority: 16
+recommended_tools:
+  - knowledge_wiki_scan_sources
+  - knowledge_wiki_coverage_report
+  - wiki_info
+tools:
+  - knowledge_wiki_scan_sources
+  - knowledge_wiki_coverage_report
+  - smart_read_document
+  - read_file
+  - extract_entities_from_text
+  - add_relation
+  - summarize_ontology
+  - wiki_info
+  - smart_file_write
+  - save_note
+
+# NOTE: triggers 不被 ACTSummary 解析，仅作文档化意图映射
+triggers:
+  - pattern: "编入百科|知识编译|建知识库|整理知识|沉淀知识"
+    guidance: "knowledge_wiki_scan_sources → extract_entities_from_text × N → add_relation × N → wiki_info(get_template) + smart_file_write × N → knowledge_wiki_coverage_report"
+  - pattern: "抽本体|抽取概念|实体关系"
+    guidance: "extract_entities_from_text → add_relation → summarize_ontology"
+
+planner_hint: |
+  🚫 严禁条款（路径强约束 · 优先级最高）：
+    - smart_file_write 的 path **必须**以 .krow/wiki/ 开头，扩展名 **必须** .md。
+    - 严禁把"中转 / 草稿 / 备忘"写到非 wiki 目录——中间产物用 save_note 记内存。
+    - 严禁把 .krow/wiki 下引擎产出的页面再次编入（自激环）；ingest 清单以
+      knowledge_wiki_scan_sources 的输出为准（它已自动排除 .krow）。
+
+  知识编译三阶段工具链：
+  1. 规划：knowledge_wiki_scan_sources(docs_dir=...) → 拿确定性源清单
+  2. 抽取（extract）：对清单里**每个源文件**调 extract_entities_from_text，
+     把概念 / 实体 / 事件写入 GlobalOntology（不要把全文塞 prompt）
+  3. 关联（relate）：add_relation 补关系边——每个核心概念**至少 1 条**向上 is_a，
+     关键实体之间补领域 specific 关系（causes / part_of / uses / depends_on）
+  4. 发布（publish）：对核心概念 / 实体逐个 wiki_info(operation="get_template") 拿模板
+     → smart_file_write 写 .krow/wiki/{concepts|entities|comparisons}/名称.md
+  5. 验收：knowledge_wiki_coverage_report 核对本体↔wiki 覆盖；
+     under_populated=true → 补写词条；最后 wiki_info(operation="validate") lint
+  6. 总览：summarize_ontology 给编译总结
+
+decision_hint: |
+  wiki 页面写入规范：
+  - 一个概念 = 一个页面，路径 .krow/wiki/{concepts|entities|sources|comparisons}/名称.md
+  - frontmatter 必填：title, tags, sources, status, type(concept/entity/source-summary/comparison)
+  - status 合法值仅 {draft, reviewed, mature, archived}；新页用 draft；严禁 published / active
+  - 必含 H2 骨架：concept 页 = ## 定义 / ## 重要属性 / ## 关联 / ## 参考；
+    entity 页 = ## 概要 / ## 关键属性 / ## 关联 / ## 参考
+  - wiki-link 用相对路径 + 语义标注：[[concepts/foo.md|rel:depends_on]]，严禁裸 slug / 中文标签 / 绝对路径
+  - 关系建模：每个 concept 至少 1 条向上 is_a；核心实体之间用领域 specific kind
+  - 写完调 wiki_info(operation="validate") 验证；human_edited:true 页面不自动改
+
+constraints:
+  - "所有 wiki 页面通过 smart_file_write 写入，路径必须在 .krow/wiki/ 下且扩展名 .md"
+  - "ingest 源清单以 knowledge_wiki_scan_sources 输出为准（已排除 .krow 自激环）"
+  - "编译收尾必须调 knowledge_wiki_coverage_report 验收覆盖率，under_populated 则补写"
+  - "禁止写中转 .txt 到非 wiki 目录；中间产物用 save_note"
+
+use_cases:
+  - "把一批领域资料编译成知识库：scan_sources → extract_entities_from_text → add_relation → smart_file_write 写 .krow/wiki/*.md → coverage_report 验收"
+  - "抽本体 + 建词条网络：每个核心概念建 wiki 页 + 向上 is_a + 横向语义关系"
+  - "编译后验收覆盖率：knowledge_wiki_coverage_report 核对本体节点 vs wiki 页"
+
+not_for:
+  - "纯文件读写（用 native_fileops）"
+  - "把中转 / 草稿写到非 .krow/wiki/ 目录（用 save_note）"
+  - "处理非知识资产（pptx / 图片 / Office 编辑用对应专属 ACT）"
+
+dependencies:
+  - knowledge_analyzer
