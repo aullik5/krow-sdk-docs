@@ -2,7 +2,6 @@
 
 > 给外部团队（科研 / 工业 / 业务）的"我刚收到 Krow SDK 邀请，怎么开工？"指南.
 > 以"周一上班 → 周五能 demo"为节奏，约 30 分钟读完，5 天动手.
->
 > **Krow Team 承诺**：你卡 1 天没进展 → 发邮件到 [support@krow.cn](mailto:support@krow.cn) 我们 24 小时内响应.
 
 ---
@@ -18,12 +17,11 @@
 ### Step 2: 装 SDK（公开包 + 私有 runtime）
 
 > **当前发布状态**（2026-05-19 W5 closeout）：✅ **PyPI 三件套全齐 + 一行装齐**：
-> - ✅ `krow-agent-sdk==0.8.12.11` 已发 PyPI 主站
-> - ✅ `krow-sdk-install==0.8.12.11` 已发 PyPI 主站（W5 首发）
-> - ✅ `krow-agent-sdk-runtime` 0.8.12.10 在 prod TOS（W4 closeout）；0.8.12.11 prod publish 进行中
+> - ✅ `krow-agent-sdk==0.8.12.28` 已发 PyPI 主站（hotfix 28 — entry-agnostic `ai_search` 注册修复）
+> - ✅ `krow-sdk-install==0.8.12.11` 已发 PyPI 主站（W5 首发，CLI 自身无 hotfix 28 影响）
+> - ✅ `krow-agent-sdk-runtime==0.8.12.28` 在 prod TOS（hotfix 28 closeout，9 wheel matrix + CI P0 tool registration smoke 守门）
 > - ✅ 三 cookbook real LLM E2E **多次 stable PASSED**（W5 user-value oriented + 5 P0 bug 治本）
->
-> 详见 ``CHANGELOG_v0.8.12.11.md` (internal design doc)` + ``v0.8.12.11-readiness-status.md` (internal design doc)`。
+> 详见 [`CHANGELOG_v0.8.12.11.md`](./CHANGELOG_v0.8.12.11.md) + [`v0.8.12.11-readiness-status.md`](./v0.8.12.11-readiness-status.md)。
 
 #### 推荐：一行 PyPI 装机（公开 SDK + install CLI）
 
@@ -38,7 +36,7 @@ pip install "krow-agent-sdk[all]"
 #### Collaborator 模式：monorepo 直装（仅 Krow team collaborator）
 
 ```bash
-# (内部 monorepo 私有；外部开发者请用 pip install)
+git clone https://github.com/aullik5/krow.git
 cd krow
 python -m venv .venv
 .venv\Scripts\activate           # Windows
@@ -242,11 +240,62 @@ agent.shutdown()
 
 > 完整 ACT plugin 范例（含 hint / gate / event listener / observability 5 类 plugin）→ [`quickstart.md`](./quickstart.md) §3-§5.
 
+### Step 4：ACT 加载自检（5 分钟兜底，强烈推荐）
+
+很多 P0 故障来自"ACT 写了但 SDK 没解析到工具" —— LLM 凭工具名瞎填参数 / 跳步骤 /
+顺序错。在跑 agent 前先**用 1 个文件兜底**：
+
+```python
+# tests/test_my_act_loading.py（每个 plugin 都写一份）
+def test_my_act_doc_coverage():
+    """反退化：保证 ACT 被 SDK 正确解析。"""
+    from modules.agent.act.act_hierarchy import get_hierarchy_loader
+    from modules.agent.act.act_loader import get_act_loader
+
+    # 触发 plugin 加载（用你 builder 的代码）
+    from my_plugin import build_my_agent
+    agent = build_my_agent()
+    try:
+        loader = get_hierarchy_loader()
+        # 你的 ACT name（ext_ 前缀）
+        ext_name = "ext_my_act"
+        extended = loader.load_extended(ext_name)
+        assert extended is not None, f"{ext_name} 未注册 / 未加载"
+
+        # 覆盖率：声明的工具数 vs 解析出的工具数
+        declared = ["my_tool_a", "my_tool_b", "my_tool_c"]
+        parsed = set(extended.all_tools.keys())
+        coverage = sum(1 for t in declared if t in parsed) / len(declared)
+        assert coverage >= 0.8, (
+            f"工具覆盖率 {coverage:.0%} < 80%；声明 {declared}；"
+            f"已解析 {sorted(parsed)}；缺 {[t for t in declared if t not in parsed]}"
+        )
+
+        # Phase-2 prompt 完整性：每个工具应能取到 ≥ 100 字符的文档
+        for t in declared:
+            doc = extended.get_tool_doc(t)
+            assert doc and len(doc) > 100, (
+                f"工具 {t} 文档过短 ({len(doc or '')}b)；"
+                f"检查 ACT extended.md 是否用了 §4.6 推荐的写法 A 或 B"
+            )
+    finally:
+        agent.shutdown()
+```
+
+跑 `pytest tests/test_my_act_loading.py -v`。
+
+| 失败信号 | 检查方向 |
+|---|---|
+| `extended is None` | ACT 未注册（检查 `with_act_plugin()` 调用是否在 build 链里） |
+| `工具覆盖率 < 80%` | extended.md 用了 SDK 不识别的 heading 风格（用中文章节名 / 编号列表）→ 改成 §4.6 写法 A 或 B |
+| `工具 X 文档过短` | 工具未在 `ToolPlugin.get_tools()` 写 `input_schema`（SDK 自动文档生成失败）→ 补全 schema |
+
 ### 今日交付
 
 - [x] 写出第一个 ACT plugin（自己起 `<org>.<name>` 双段 ID）
 - [x] 知道 ACT yaml + extended.md 双层结构
 - [x] 知道 ACT 内推荐用真实存在的 tool（不要捏造 `reasoning_chain_of_thought` 这种）
+- [x] **跑通 ACT 加载自检 test**（防 P0：写完 ACT 但 SDK 解析不到工具）
 
 **下一步** → Day 3：加 Tool / Hint / Gate plugin（按需做你领域的定制扩展）.
 
@@ -356,7 +405,7 @@ def replay_store(tmp_path):
 def test_research_paper_plugin_with_real_llm_recording(replay_store):
     """第一次跑：真实 LLM + 录制（CI 不跑此条；本地 dev 时跑 1 次）."""
     pytest.skip("仅本地 record mode 跑")
-    
+
     agent = (
         AgentBuilder()
         .with_krow_api_key(os.environ["KROW_API_KEY"])
@@ -372,7 +421,7 @@ def test_research_paper_plugin_with_real_llm_recording(replay_store):
 def test_research_paper_plugin_replay(replay_store):
     """CI 跑此条：用之前录的 LLM 输出重放，零网络 / 零 token."""
     # 先把 record mode 录制的 replay 文件 copy 到 tmp_path / "llm_replay"
-    
+
     agent = (
         AgentBuilder()
         .with_krow_api_key("sk-user-fake-for-replay-mode")  # 任何合法 key 都行
@@ -382,7 +431,7 @@ def test_research_paper_plugin_replay(replay_store):
         .build()
     )
     result = agent.run("读 ./papers/transformer.pdf")
-    
+
     # Multi-dim 断言（详 quickstart §5.4）
     assert result.success
     assert "作者" in result.final_output or "author" in result.final_output.lower()

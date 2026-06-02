@@ -257,7 +257,6 @@ agent = AgentBuilder.from_config(cfg).build()
 ### §2.3 LLM 模型选择 API（6 类）
 
 > Builder time 显式指定每类模型 ID。云端清单走 `GET https://api.krow.cn/v1/models`（按 `is_<category>` 字段筛）。
->
 > **设计协议**（专家辩论 chore/sdk-model-selection-api 方案 B）：
 > - **System 1 边界** — 模型选择是确定性查表，**不允许 per-call override**（防 LLM 决定 LLM）
 > - 未指定 → 走 cloud-model fallback（与现有行为完全一致；零 breaking 风险）
@@ -350,7 +349,6 @@ agent = (
 | `空字符串` | `with_base_url("")` |
 
 > **何时不需要调**：用 `sk-` 生产 key + 默认 `https://api.krow.cn` → **不要**调；调了反而会被 cloud 拒（cross-tenant）。
->
 > **常见踩坑**：把 `with_base_url("https://api.krow.cn/v1")` 写成带 `/v1` 后缀 — SDK 会内部加 `/v1/...`，导致最终 URL 变 `/v1/v1/chat/completions` 404。
 
 #### `with_http_gateway(*, enable=True, host="127.0.0.1", port=8090, auth_token=None, dry_run=False) -> AgentBuilder` (⚠️ experimental)
@@ -615,6 +613,26 @@ else:
 
 > SDK 自动 emit metric `agent.run.calls` + audit `agent.run.start/complete/error`（如配置了 `ObservabilityPlugin` 会通过 sink 转发）。
 
+#### 内置任务路由优化（v0.8.12.25 起，**零代码改动**）
+
+`Agent.run()` 在 plan_task 阶段会让 LLM 对 `user_input` 做语义分类，并按任务类型走不同的执行路径：
+
+| 任务类型 | 路径 | 用户感知 |
+|---|---|---|
+| 寒暄 / 小话题（"你好"、"谢谢"） | 0-step 直出（无 plan / 无工具调用） | < 2s 返回 |
+| 纯信息检索（"OpenAI 最近发布了什么模型？"） | `ai_search` primary_step direct out | ~30-50s 返回，保留搜索引擎原始 `[1][2]` 引用脚标 + 自动拼接的 Markdown "## 参考来源" 列表 |
+| 简单咨询 / 科普 / 答题 | macro single-step direct out（跳过 summary 改写） | 比常规快 ~10-30s |
+| 标准任务（文件交付 / 多步综合 / 数据分析） | 完整 macro+micro ReACT + summary 改写 | 常规延迟 |
+
+**外部开发者影响**：
+
+- ✅ `result.final_output` 在快速路径下直接是工具产出的 Markdown 答案（不被 LLM 改写）
+- ✅ 内置 `ai_search` 工具的 `answer` 字段会自动追加 Markdown 格式 `## 参考来源` 列表；结构化 `sources: list[dict]` 字段保留供下游消费方继续用
+- ✅ 无需修改任何 SDK 调用代码——升级到 v0.8.12.25 即默认生效
+- ⚠️ 自定义 `ToolPlugin` 若想享受同等待遇，需在 ACT yaml 内为该工具的 step 配 `primary_deliverable_step: <step_id>` + `report_detail: "detailed"`（详 `docs/sdk/advanced-development-guide.md`）
+
+具体反模式 + 配套示例：见 [`quickstart.md` §4.6](./quickstart.md#46-内置-ai_search-联网搜索自动快速路径pr-2-起零代码改动)。
+
 ---
 
 ### §3.2 `Agent.run_stream()` — 流式执行
@@ -761,6 +779,7 @@ class BudgetSpec:
     max_replans: int = 3
     micro_max_iterations: int = 8
     micro_max_time_ms: int = 180_000
+    max_plan_steps: int = 20
 ```
 
 | 字段 | 单位 | 默认 | 含义 |
@@ -768,12 +787,18 @@ class BudgetSpec:
 | `target_walltime_s` | 秒 | 600 | 目标墙钟（agent 倾向在此前完成；超过触发 adapt extension 协商） |
 | `max_walltime_s` | 秒 | 1800 | **硬上限**墙钟；超过 fail-loud 中断 |
 | `max_total_llm_calls` | 次 | 120 | 进程级 LLM 调用上限（macro + micro 总和） |
-| `max_adapt_extensions` | 次 | 3 | adapt budget extension 触发次数上限 |
+| `max_adapt_extensions` | 次 | 3 | **adapt budget extension** 触发次数上限（单个 plan step 内"再追加一步"的次数；**不是** macro plan 总步数，后者见 `max_plan_steps`） |
 | `max_replans` | 次 | 3 | macro replan 触发次数上限 |
-| `micro_max_iterations` | 次 | 8 | 单 micro ReACT 内最大迭代数 |
-| `micro_max_time_ms` | 毫秒 | 180000 | 单 micro ReACT 最大墙钟 |
+| `micro_max_iterations` | 次 | 8 | **通用工具步** micro ReACT 的默认最大迭代数（仅约束无特化 tuning 的通用步；ACT yaml `react_config` 与 `content_source`/`terminal_execute` 等特化值优先级更高）。经 `task_context['micro_budget']` 接入运行时 |
+| `micro_max_time_ms` | 毫秒 | 180000 | **通用工具步** micro ReACT 默认最大墙钟（`terminal_execute` 保 300s 底线）。经 `task_context['micro_budget']` 接入运行时 |
+| `max_plan_steps` | 个 | 20 | **macro plan 步数上限**（一次任务最多执行多少个宏观 plan step）。运行时夹紧到 `[12, 40]`：**下限 12**（设更小会被抬到 12；低于 12 仅内置 Strategy contract 可声明），**上限 40**。长流程自定义 ACT 需调高 |
 
 > **建议起点**（外部开发者）：默认值适合"中等复杂度任务（写报告、PPT）"。如任务很轻（如简单文本归纳）可把 `max_total_llm_calls` 降到 30-60；如任务重（深度研究 + 跨工具协作）可升到 200。
+> **长流程自定义 ACT 必读**：若你的 ACT 业务阶段较多（如 7+ 阶段），planner（LLM）可能动态拆成 15~20 个 macro 步；默认 `max_plan_steps=20` 通常够用，但若仍被 `safety_net:max_steps` 提前收尾，请显式调高（上限 40）：
+> ```python
+> budget = BudgetSpec(max_plan_steps=28, max_total_llm_calls=200)
+> ```
+> 注意：LLM 把业务阶段拆成更多技术步骤是正常的动态规划行为（系统不会硬绑定阶段数）；你要保证的是"步数预算 ≥ 实际需要的步数"，而非强制 LLM 只走 N 步。
 
 ```python
 from krow_agent_sdk import BudgetSpec
@@ -1162,11 +1187,13 @@ class ObservabilityPlugin(Protocol):
     def register(self, observability_facade: Any) -> None: ...
 ```
 
-| `observability_facade` 提供（SDK 注入） | 用途 |
-|---|---|
-| `add_metric_sink(callback: Callable[[name, value, labels], None])` | metric 转发 |
-| `add_trace_sink(callback: Callable[[span], None])` | tracing 转发 |
-| `add_audit_sink(callback: Callable[[event], None])` | audit log 转发 |
+| `observability_facade` 提供（SDK 注入） | 用途 | 内置 emit 现状 |
+|---|---|---|
+| `add_metric_sink(callback: Callable[[name, value, labels], None])` | metric 转发 | ✅ SDK 内置 emit（如 `agent.run.calls`） |
+| `add_trace_sink(callback: Callable[[span], None])` | tracing 转发 | ⚠️ **当前 SDK 内置不 emit trace span**——sink 可注册但不会被内置埋点喂数据（保留给你自己的 span / 未来埋点）。详 honesty note |
+| `add_audit_sink(callback: Callable[[event], None])` | audit log 转发 | ✅ SDK 内置 emit（如 `agent.run.start/complete/error`） |
+
+> **诚实化说明（2026-06-01）**：内置埋点目前只触发 `emit_sdk_metric` / `emit_sdk_audit`（见 `modules/observability/sink_registry.py`），**未**调用 `emit_sdk_trace`。因此 `add_trace_sink` 注册的回调当前不会收到 SDK 自动产生的 span；若你需要 trace，请在自己的 plugin/工具代码里显式调用 `emit_sdk_trace(...)`。`metric` 与 `audit` sink 则会正常收到内置事件。
 
 #### 最小实现
 
@@ -1203,7 +1230,7 @@ class MCPServerPlugin(Protocol):
 
 | 形态 | 方法 | 行为 | 适用 |
 |---|---|---|---|
-| **A** 远程 endpoint metadata | `get_servers()` | 仅 collect 到 `Agent.mcp_servers`，**不**自动注册到 ToolManager | plugin 仅声明用了哪些远程 MCP |
+| **A** 远程 endpoint metadata | `get_servers()` | 仅 collect 到 `Agent.mcp_servers`，**不**自动注册到 ToolManager、**也不自动建立连接**（需在 `on_load` 内自建 client，或改用形态 B/C） | plugin 仅声明用了哪些远程 MCP |
 | **B** in-process server | `get_in_process_servers()` | feature flag `KROW_ENABLE_MCP_SERVER_PLUGIN=1` 开启时，**自动注册到 ToolManager** | plugin 内嵌一个 MCP server 实例 |
 | **C** 远程 client | `get_in_process_servers()` 但实例是远程 client | 同 B，SDK 不区分 B/C | 接入第三方 SaaS MCP 服务 |
 
@@ -2317,6 +2344,5 @@ from krow_agent_sdk.telemetry import (
 ---
 
 > **本手册结束。**
->
 > 任何 API 文档错误 / 不清晰 / 缺失，请在 [GitHub Issues](https://github.com/aullik5/krow-sdk-docs/issues) 反馈。
 > 进阶设计原则与最佳实践见 [`advanced-development-guide.md`](./advanced-development-guide.md)。

@@ -3,12 +3,9 @@
 > **当前状态（2026-05-21）** ✅：自 `krow-agent-sdk 0.8.12.15` 起，headless（无桌面 IDE）
 > 场景下 `pip install krow-agent-sdk` + `KROW_API_KEY` 即可装上即跑——**无需** mock
 > `app.container`、**无需** root 权限、**无需**写 `site-packages/`。
->
 > 本文档覆盖 KrowChat 等外部团队最常用的两种部署形态：
->
 > 1. **基于 `python:slim` 自建容器**（推荐 — 完全自主控制 base image / Python 版本 / 依赖）
 > 2. **基于官方 `ghcr.io/aullik5/krow-headless` 镜像扩展**（最快 — 不操心 system libs）
->
 > 前置阅读：[`quickstart.md`](./quickstart.md)（5 分钟上手 SDK API）
 > · [`runtime-install.md`](./runtime-install.md)（拉私有 runtime wheel）
 

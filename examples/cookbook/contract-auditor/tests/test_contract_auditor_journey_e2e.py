@@ -47,10 +47,9 @@ if str(_COOKBOOK_ROOT) not in sys.path:
     sys.path.insert(0, str(_COOKBOOK_ROOT))
 
 from _journey_e2e_helpers import (  # noqa: E402
-    assert_journey,
+    assert_journey_with_retry,
     load_expected_card,
     require_real_llm,
-    run_journey,
     synthesize_contract_pdf,
 )
 
@@ -67,8 +66,9 @@ def test_contract_auditor_tier1_journey(tmp_path: Path) -> None:
         include_no_termination_clause=False,
     )
     output_dir = tmp_path / "output"
-
-    result = run_journey(
+    card = load_expected_card("tier1_minimal.yaml", cookbook_dir="contract-auditor")
+    # PR #624 (2026-05-27): retry 兜底 LLM 偶发抖动
+    assert_journey_with_retry(
         cookbook_dir="contract-auditor",
         argv=[
             str(pdf),
@@ -79,9 +79,7 @@ def test_contract_auditor_tier1_journey(tmp_path: Path) -> None:
             "--budget-walltime", "600",
             "--budget-replans", "1",
         ],
+        card=card,
         cwd=tmp_path,
         timeout_s=900,
     )
-
-    card = load_expected_card("tier1_minimal.yaml", cookbook_dir="contract-auditor")
-    assert_journey(result, card=card)

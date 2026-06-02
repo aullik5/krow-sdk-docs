@@ -170,6 +170,45 @@ cookbook 主动演示了三种生产级错误处理：
 
 每条降级都给 LLM 黄金错误模板（一句话 + 原因 + 1-3 个修法）。
 
+### `write_report` 成品契约（**P1-A · 2026-05-25 重要变化**）
+
+> 历史教训：原 schema 要求 LLM 同时填 ``title`` + ``content`` 两个 `required` 字段
+> （"零件契约"反模式），``qwen3.7-max`` 偶发漏 ``title`` 字段 →
+> 工具直接 BLOCK，整个 journey 重试浪费 2-3 LLM call（详 lessons 2026-05-25 §教训3）。
+
+**现在**（``sdk-v0.8.12.30+``）：
+
+```python
+# 推荐用法（finished artifact / 成品契约）
+write_report(
+    output_path="output/report.md",
+    markdown="# 报告\n\n## 异常\n\n...完整 markdown...",
+)
+
+# 老用法（building blocks / 零件契约 · 仍兼容但不推荐）
+write_report(
+    output_path="output/report.md",
+    title="报告",
+    content="## 异常\n\n...",
+)
+
+# LLM 漏 title 也不再 BLOCK（schema required=["output_path"]; handler 自动 fallback）
+write_report(
+    output_path="output/report.md",
+    content="# 报告标题\n\n## 异常\n\n...",  # title 从内容 H1 / 文件名提取
+)
+```
+
+System 1 normalization（handler 内部自动跑）：
+
+- 缺 ``title`` → 从 ``markdown`` / ``content`` 首 H1 提取；都缺则从 ``output_path.stem`` 兜底
+- ``content`` 已有首 H1 与 ``title`` 重复 → 自动去重
+- 检测到独占行的 ``**章节标题**`` （``qwen3.7-max`` 常见漂移）→ 自动转 ``## 章节标题``
+- 行内 ``**加粗**`` 不会被误改成 ``##``（仅独占行才转）
+
+详 ``packages/krow-agent-sdk/examples/cookbook/data-analyst/data_analyst_plugin.py::write_report``
++ "成品契约 vs 零件契约"。
+
 ---
 
 ## 反模式（禁止）

@@ -1,33 +1,3 @@
----
-name: financial_analyst
-display_name: 财经分析员（Financial Analyst）
-description: |
-  当用户提供 N 家上市公司年报 PDF（或 XBRL 数据）且要"行业横向对比 / 投资简报 /
-  KPI 抽取 / 估值锚 / 雷达图"时进入此 ACT。
-  本 ACT 内 Agent 会：
-  - 用 deterministic 工具从年报 PDF 抽 KPI（不让 LLM 凭感觉抽，避免单位错位）
-  - 用 normalize_kpi_table 拉平到同币种同单位（横向对比的前提）
-  - 用 industry_baseline 算行业 mean/std/quartiles（HintPlugin 据此推 3σ 信号）
-  - 用 radar_chart_svg 生成雷达图（System 1 几何，不让 LLM 算 cos/sin）
-  - 用 valuation_anchor 算 PE/PB/PS + 行业对比 verdict
-  - 在合规守门 (DisclosureCompletenessGate / InsiderInfoGate) 监督下产出投资简报
-when_to_enter:
-  - "用户提到 上市公司年报 / annual report / 10-K / 招股书"
-  - "用户提到 投资简报 / 投资逻辑 / 投资建议 / IPO 研究"
-  - "用户提到 KPI 对比 / 财务指标 / 营收 / 利润 / 毛利率 / ROE"
-  - "用户提到 行业对比 / 同行对标 / peer comparison"
-  - "用户上传了多份 PDF 文件并要求横向比较"
-  - "用户提到 估值 / PE / PB / PS / 雷达图"
-tools:
-  - financial_analyst_extract_kpi_from_pdf
-  - financial_analyst_normalize_kpi_table
-  - financial_analyst_industry_baseline
-  - financial_analyst_radar_chart_svg
-  - financial_analyst_valuation_anchor
-  - word_smart_export
-priority: 10
----
-
 # 财经分析员 ACT — 扩展指南
 
 ## 本 ACT 的定位
@@ -116,6 +86,45 @@ table[i]:
 - **InsiderInfoGate 守门铁律**：**禁止**简报里出现"内幕 / 未公开 / 尚未披露 /
   inside information / non-public" 等关键词。所有数据必须来自年报已公开内容。
   违反 = BLOCK + 重写
+
+#### **6.1 markdown 格式铁律（防 PDF 渲染漂移 · 详 lessons 2026-05-25 §教训3）**
+
+> 开发者 zzp 2026-05-25 真跑反馈：qwen3.7-max 在本 cookbook 偶发把章节标题写成
+> 独占行的 ``**章节名**`` 而非 ``## 章节名``，导致 word_smart_export PDF 渲染
+> 时章节大小不对（PDF 引擎不识别 bold 作 heading）。
+
+**LLM 写简报 markdown 时必须遵守**：
+
+| ✅ 正确 | ❌ 错误 | 原因 |
+|---|---|---|
+| ``# 投资简报 - <公司名>`` | ``**投资简报 - 公司名**`` | H1 必须用 `#`；bold ≠ heading |
+| ``## 1. 业务概览`` | 独占行 ``**1. 业务概览**`` | 章节标题用 `##` / `###`；bold 给行内强调 |
+| 行内强调用 ``**关键词**`` | 把整段 wrap 成 `**` | bold 给关键词，不给整行 |
+
+**5 段结构对应 markdown 层级**：
+
+```markdown
+# 投资简报 - <公司名>
+
+## 1. 业务概览
+...
+
+## 2. 财务表现
+...
+
+## 3. 行业地位
+...
+
+## 4. 风险因素
+...
+
+## 5. 投资建议
+...
+```
+
+**System 1 守门（DisclosureCompletenessGate）已包含 markdown 结构检查**——若简报
+用了独占行 bold 作章节标题，gate 会因 "缺 ## 段" 触发 BLOCK + 要求 LLM 重写。
+不要靠"hint 提醒"，**直接写对 markdown 即可**（详 AGENTS.md §0.1 "工具注册 ≠ 激活" 反模式）。
 
 ### 7. **PDF 渲染**（可选）
 

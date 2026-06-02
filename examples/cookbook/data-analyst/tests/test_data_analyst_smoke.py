@@ -6,7 +6,7 @@
   - read_csv / compute_stats / detect_anomalies / compute_correlation /
     pick_palette / write_report
 - §3 错误路径（不存在的 CSV / 编码错 / 写入失败）— 黄金错误模板覆盖
-- §4 ACT 资源文件存在性 + frontmatter 合法 + 引用了 word_smart_export 内置工具
+- §4 ACT 资源文件存在性 + __act__.yaml manifest 合法 + 引用了 word_smart_export 内置工具
 - §5 pick_palette 查表配色（System 1 deterministic）
 - §6 错误降级演示（encoding fallback）
 - §7 v2 新增：detect_anomalies / compute_correlation 工具
@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
 from data_analyst_plugin import (
     AuditEventListener,
     DataAnalystACTPlugin,
@@ -74,6 +75,9 @@ def test_act_plugin_protocol_shape():
     assert plugin.act_name == "data_analyst"
     assert plugin.get_act_root().exists(), "ACT root 目录必须存在"
     assert plugin.get_act_file_path().exists(), "ACT extended.md 必须存在"
+    assert (plugin.get_act_root() / "__act__.yaml").exists(), (
+        "ACT manifest __act__.yaml 必须存在（独立 manifest，非 .md frontmatter）"
+    )
     tool_names = plugin.get_tool_names()
     assert tool_names == [
         "data_analyst_read_csv",
@@ -127,6 +131,7 @@ def test_compute_stats_happy_path():
 
 
 def test_write_report_happy_path(tmp_path):
+    """老调用方零件契约 (title + content) 仍可用 (向后兼容)."""
     out = tmp_path / "report.md"
     result = write_report(out, title="Test Report", content="第 1 段。\n\n第 2 段。")
     assert result["ok"] is True
@@ -134,6 +139,128 @@ def test_write_report_happy_path(tmp_path):
     body = out.read_text(encoding="utf-8")
     assert body.startswith("# Test Report\n\n")
     assert "第 1 段" in body and "第 2 段" in body
+    assert result["effective_title"] == "Test Report"
+
+
+# ============================================================
+# §2.x 成品契约 (markdown 单字段) + LLM 漏 required 场景 + normalize
+# 教训驱动: lessons 2026-05-25-sdk-d1-gate-judge-decay-and-cookbook-feedback §教训3
+# ============================================================
+
+
+def test_write_report_finished_artifact_contract(tmp_path):
+    """推荐用法: 只传 markdown 单字段 (完整 markdown 含 # 标题)."""
+    out = tmp_path / "report.md"
+    md = (
+        "# Titanic 数据审计\n\n"
+        "## 1. 数据概况\n- 891 行 × 12 列\n\n"
+        "## 2. 风险\n- Age 列缺失 19%\n"
+    )
+    result = write_report(out, markdown=md)
+    assert result["ok"] is True
+    body = out.read_text(encoding="utf-8")
+    # 标题从 markdown 首个 H1 自动提取, 不再外层套
+    assert body.count("# Titanic 数据审计") == 1, "H1 必须只出现一次 (无重复)"
+    assert "## 1. 数据概况" in body and "## 2. 风险" in body
+    assert result["effective_title"] == "Titanic 数据审计"
+
+
+def test_write_report_llm_drops_title_does_not_break(tmp_path):
+    """开发者 zzp run1/run2 真实场景: LLM 漏 title required → 旧实现短路失败.
+
+    新实现: title 改 optional, handler 自动从 content 首 H1 / output_path.stem 兜底.
+    """
+    out = tmp_path / "titanic_audit.md"
+    # 模拟 qwen3.7-max 漏 title 但 content 自带 H1 的真实输出 (开发者 run1 复现)
+    content = "# Titanic 数据审计报告\n\n## 1. 概况\n正文..."
+    result = write_report(out, content=content)
+    assert result["ok"] is True, (
+        "LLM 漏 title 时 handler 应自动从 content 首 H1 兜底, 不返黄金错误"
+    )
+    body = out.read_text(encoding="utf-8")
+    assert body.count("# Titanic 数据审计报告") == 1, (
+        "H1 必须只出现一次 (root cause: 旧实现 `# {title}\\n{content}` 与 content 自带 # 拼接 → H1 重复)"
+    )
+    assert result["effective_title"] == "Titanic 数据审计报告"
+
+
+def test_write_report_llm_drops_both_title_and_h1_uses_filename(tmp_path):
+    """LLM 漏 title 且 content 无 H1 → 用文件名 stem 兜底."""
+    out = tmp_path / "my_analysis.md"
+    result = write_report(out, content="纯正文, 无任何 H1.\n\n第 2 段.")
+    assert result["ok"] is True
+    body = out.read_text(encoding="utf-8")
+    assert "# my_analysis" in body
+    assert result["effective_title"] == "my_analysis"
+
+
+def test_write_report_dedupes_h1_when_content_already_has_one(tmp_path):
+    """旧 zzp run1/run2 H1 重复 bug 直接守门: 即使老调用方传 title + content (content 又自带 H1) 也不重复."""
+    out = tmp_path / "report.md"
+    # 模拟开发者 run1 真实场景: title="标题 X", content 又以 "# 标题 X" 开头
+    result = write_report(
+        out,
+        title="标题 X",
+        content="# 标题 X\n\n## 1. 第一节\n正文...",
+    )
+    assert result["ok"] is True
+    body = out.read_text(encoding="utf-8")
+    assert body.count("# 标题 X") == 1, (
+        "H1 必须只出现一次 (lessons 2026-05-25 直接守门)"
+    )
+
+
+def test_write_report_normalizes_bold_headings(tmp_path):
+    """financial-analyst 同根改进: 独占行的 `**章节名**` → `## 章节名` (handler normalize)."""
+    out = tmp_path / "report.md"
+    md = (
+        "# 投资简报\n\n"
+        "**业务概览**\n\n正文 1.\n\n"
+        "**财务表现**\n\n正文 2.\n"
+    )
+    result = write_report(out, markdown=md)
+    assert result["ok"] is True
+    body = out.read_text(encoding="utf-8")
+    assert "## 业务概览" in body, "独占行的 **xxx** 必须被 normalize 为 ## xxx"
+    assert "## 财务表现" in body
+    # 原 **加粗** 形式不应残留
+    assert "**业务概览**" not in body
+    assert "**财务表现**" not in body
+
+
+def test_write_report_preserves_inline_bold(tmp_path):
+    """normalize 只动独占行的 **xxx**, 不破坏行内加粗."""
+    out = tmp_path / "report.md"
+    md = "# 报告\n\n这是 **行内加粗** 的句子, 句末有句号.\n"
+    result = write_report(out, markdown=md)
+    body = out.read_text(encoding="utf-8")
+    assert "**行内加粗**" in body, "行内加粗必须保留, normalize 只动独占行"
+    # 行内加粗不应被改造（normalize 只动 fullmatch \*\*xxx\*\* 的独占行）
+    assert "## 行内加粗" not in body
+
+
+def test_write_report_rejects_empty_input(tmp_path):
+    """既无 markdown 也无 content → 黄金模板错误 (而非空文件)."""
+    out = tmp_path / "report.md"
+    result = write_report(out)
+    assert result["ok"] is False
+    assert "成品契约" in result["error"] or "零件契约" in result["error"]
+
+
+def test_write_report_schema_required_minimized(tmp_path):
+    """反退化: data_analyst_write_report schema.required 只应含 output_path."""
+    plugin = DataAnalystToolPlugin()
+    write_tool = next(t for t in plugin.get_tools() if t["name"] == "data_analyst_write_report")
+    required = write_tool["input_schema"]["required"]
+    assert required == ["output_path"], (
+        f"required 应只剩 output_path (成品契约, lessons 2026-05-25 §教训3); "
+        f"实际 required={required}. 若加回 title/content 到 required 会复活 "
+        f"qwen 漏 required 短路失败 bug."
+    )
+    # 字段仍存在 (向后兼容老调用方)
+    props = write_tool["input_schema"]["properties"]
+    assert "markdown" in props, "成品契约推荐字段 markdown 必须在 schema 中暴露"
+    assert "title" in props and "content" in props, "零件契约老字段保留 (兼容)"
 
 
 # ============================================================
@@ -180,19 +307,26 @@ def test_read_csv_encoding_case_normalization():
 
 
 # ============================================================
-# §4. ACT 资源文件 frontmatter 合法
+# §4. ACT manifest（独立 __act__.yaml）合法
 # ============================================================
 
 
-def test_act_extended_md_has_yaml_frontmatter():
+def test_act_manifest_yaml_valid():
+    """manifest 必须是独立 ``__act__.yaml``（不是 .md frontmatter）。
+
+    2026-05-31：krow 的 ``.md`` 回退解析器不读 YAML frontmatter（且把
+    priority 写死 40），所以 manifest 必须独立成 ``__act__.yaml``，否则
+    priority / description / tools 会被静默丢弃。
+    """
     plugin = DataAnalystACTPlugin()
-    body = plugin.get_act_file_path().read_text(encoding="utf-8")
-    assert body.startswith("---\n"), "extended.md 必须以 YAML frontmatter 起头"
-    end_marker = body.find("\n---\n", 4)
-    assert end_marker > 0, "frontmatter 必须有结束标记 ---"
-    fm = body[4:end_marker]
-    for required_key in ("name:", "display_name:", "description:", "tools:"):
-        assert required_key in fm, f"frontmatter 必须含 {required_key}"
+    manifest_path = plugin.get_act_root() / "__act__.yaml"
+    assert manifest_path.is_file(), "manifest 必须是独立 __act__.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert isinstance(manifest, dict), "__act__.yaml 必须 parse 成 dict"
+    for required_key in ("name", "display_name", "description", "tools", "priority"):
+        assert required_key in manifest, f"manifest 必须含 {required_key}"
+    assert manifest["name"] == "data_analyst"
+    tools = manifest["tools"]
     # v2 升级版必须含 6 个 cookbook 工具 + 1 个 Krow 内置工具（PDF 输出复用）
     for tool_name in (
         "data_analyst_read_csv",
@@ -203,7 +337,16 @@ def test_act_extended_md_has_yaml_frontmatter():
         "data_analyst_write_report",
         "word_smart_export",
     ):
-        assert tool_name in fm, f"frontmatter tools 列表必须含 {tool_name}"
+        assert tool_name in tools, f"manifest tools 列表必须含 {tool_name}"
+
+
+def test_act_extended_md_has_no_frontmatter():
+    """body-only：manifest 已迁出到 __act__.yaml，.md 不应再带 frontmatter。"""
+    body = DataAnalystACTPlugin().get_act_file_path().read_text(encoding="utf-8")
+    assert not body.startswith("---"), (
+        "ext_*.md 不应再含 YAML frontmatter（loader 不读它）；manifest 在 __act__.yaml"
+    )
+    assert body.lstrip().startswith("#"), "ext_*.md 应以正文 markdown 标题起头"
 
 
 def test_act_extended_md_teaches_ssot_reuse():

@@ -4,12 +4,11 @@
 > Effective Date: 2026-05-13 (v1.0 draft) / 2026-05-15 (v1.1 model-review applied)
 > Issuer: Krow Team (`support@krow.cn`)
 > Status: **DRAFT — model legal review applied; pending external counsel sign-off + business decisions on §11 / §9 floor / §C consent mechanism**
->
 > **Note** (v1.1, 2026-05-15): Sections marked `[PENDING ATTORNEY]` or
 > `[PENDING BUSINESS]` are placeholders awaiting external counsel sign-off
 > and business decisions respectively. Until v1.x reaches `EFFECTIVE`
 > status, this document is published as a **good-faith disclosure** of
-> intended terms. See ``eula-mock-legal-review-feedback.md` (internal design doc)`
+> intended terms. See [`eula-mock-legal-review-feedback.md`](./eula-mock-legal-review-feedback.md)
 > for the full review log and rationale behind v1.0 → v1.1 changes.
 
 ---
@@ -451,7 +450,7 @@ disclosure (C.3) — is intended to satisfy:
 **Final selection** between the three layers (whether all three are
 mandatory or only C.1 + C.3 baseline) is **[PENDING BUSINESS DECISION
 + external counsel sign-off]**. Implementation roadmap: see
-``eula-legal-review-checklist.md` (internal design doc)` §6.
+[`eula-legal-review-checklist.md`](./eula-legal-review-checklist.md) §6.
 
 ---
 

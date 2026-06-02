@@ -1,7 +1,6 @@
 # Krow Agent SDK Runtime 安装指南（外部开发者）
 
 > **当前状态（2026-05-19 W5 closeout）** ✅：v2 reverse-proxy 协议**全部上线，外部开发者可一行装齐**：
->
 > ```bash
 > pip install krow-agent-sdk krow-sdk-install
 > export KROW_API_KEY=sk-user-xxxxxxxxxxxxxxxxxxxxx
@@ -10,19 +9,20 @@
 > # → 装上 krow-agent-sdk-runtime + 100+ deps
 > # → agent.run("...") 真实跑通
 > ```
->
 > **变更历史**：
-> - 2026-05-19（W5 closeout）：`krow-sdk-install` 首次上 PyPI prod（trusted publisher 配置完成）；三 cookbook real LLM E2E 多次 stable PASSED；W5 修复 5 个 P0 bug（详 ``CHANGELOG_v0.8.12.11.md` (internal design doc)`）
+> - 2026-05-23（hotfix 28 closeout）：`krow-agent-sdk==0.8.12.28` + `krow-agent-sdk-runtime==0.8.12.28` 已发布。
+>   修复 wheel-only 部署模式下 `ai_search` 等 P0 内置工具未注册的回归（KrowChat 反馈 round 2 / hf24/27 都未根治）。
+>   `AgentBuilder().build()` 完成时 `ToolManager` 一定含 `ai_search` / `llm_generate` / `smart_read_document` / `save_image`。
+>   反模式 "主仓 dev mode ≠ wheel 部署 mode" 已加入 AGENTS.md §0.1。。
+> - 2026-05-19（W5 closeout）：`krow-sdk-install` 首次上 PyPI prod（trusted publisher 配置完成）；三 cookbook real LLM E2E 多次 stable PASSED；W5 修复 5 个 P0 bug（详 [`CHANGELOG_v0.8.12.11.md`](./CHANGELOG_v0.8.12.11.md)）
 > - 2026-05-19（W4 closeout）：完整 install 链路 SDK team 实测跑通（4 分 33 秒装 runtime + SDK + 100+ deps）；prod gateway DNS cutover 完成
 > - 2026-05-16：v2 reverse-proxy 协议与 Krow Cloud team 锁定
->
 > **设计 v2 reverse-proxy**：
 > - 私有 runtime wheel 走 **Krow Cloud 反向代理** 分发：
 >   `https://api.krow.cn/sdk/runtime/pypi/{simple,files}/...`
 > - Storage：火山引擎 TOS（cn-shanghai，bucket `krow-sdk-runtime`；HK transit + CRR）
 > - 鉴权：`KROW_API_KEY` Bearer token，gateway 内套餐 entitlement + rate limit + 计量
 > - 客户感知：与装公开 wheel 体感一致，但走 Krow Cloud 一站式鉴权（不需要 GitHub PAT，不需要单独配 index-url）
->
 > 前置阅读：[``quickstart.md``](./quickstart.md)（5 分钟上手公开 SDK）
 
 ---
@@ -237,7 +237,7 @@ python --version  # 确认 3.11 / 3.12 / 3.13
 
 **原因**：你的 host platform tag 不在 runtime wheel matrix 内，或 `krow-sdk-install`
 < 0.8.12.12 的旧版本因 bug 把 macOS / Linux 兼容 wheel 也误判为 mismatch（见
-`CHANGELOG_v0.8.12.12 (internal design doc)`）。
+[CHANGELOG_v0.8.12.12](./CHANGELOG_v0.8.12.12.md)）。
 
 **先升级 installer**（**强烈推荐**）：
 

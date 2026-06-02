@@ -25,7 +25,13 @@
 #   debt_to_equity = 0.32
 
 exit_code: 0
-max_walltime_s: 700
+# Walltime SSOT (P2-A · 2026-05-25 · lessons 2026-05-25 §教训5):
+#   - serial: 单 journey 跑（dev 本机 / nightly --max-workers=1）
+#   - parallel: 同进程多 journey 跑（pytest-xdist / KROW_COOKBOOK_JOURNEY_PARALLEL=1）
+#     默认 1.5x; assert_journey 自动检测 PYTEST_XDIST_WORKER + 三套 env SSOT
+# 老字段 max_walltime_s 仍兼容（作 serial fallback; 无 parallel 时取 serial * 1.5）
+max_walltime_s_serial: 700
+max_walltime_s_parallel: 1050
 
 required_artifacts:
   - investment_memo.md

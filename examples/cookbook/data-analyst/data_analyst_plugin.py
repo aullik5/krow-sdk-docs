@@ -608,21 +608,134 @@ def pick_palette(palette_kind: str = "categorical", n: int = 10) -> dict[str, An
 # ============================================================
 
 
+def _extract_h1_or_fallback(markdown_text: str, fallback: str) -> str:
+    """从 markdown 提取首个 H1; 若无则用 fallback (通常 output_path.stem)."""
+    for line in markdown_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            return stripped[2:].strip()
+    return fallback
+
+
+def _normalize_bold_headings(markdown_text: str) -> str:
+    """独占一行的 ``**xxx**`` → ``## xxx`` (handler 内 System 1 normalize).
+
+    教训驱动:
+    qwen3.7-max 等模型在某些 cookbook 的 ACT 约束不足时, 会把章节标题写成
+    ``**章节名**`` 而非 ``## 章节名``. 不靠模型自律 → handler 后处理 normalize.
+    """
+    import re
+
+    out_lines = []
+    for line in markdown_text.splitlines():
+        stripped = line.strip()
+        # 匹配独占一行的 **xxx**（前后无其他字符）
+        m = re.fullmatch(r"\*\*(.+?)\*\*", stripped)
+        if m:
+            heading = m.group(1).strip()
+            # 启发式: 跳过明显是"加粗短语"而非"章节标题"的内容（含句号 / 太长）
+            if len(heading) <= 60 and not heading.endswith("。") and not heading.endswith("."):
+                out_lines.append(f"## {heading}")
+                continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
+def _dedupe_leading_h1(markdown_text: str, expected_title: str) -> str:
+    """若 markdown 顶部有 `# {expected_title}` 与下一行又一个 `# 同标题` → 去重.
+
+    具体场景: handler 旧实现拼 ``# {title}\n\n{content}``, 但 LLM 在 content
+    里又自己写了 ``# {title}``, 结果 H1 出现 2 次 (开发者 zzp run1/run2 都复现).
+    新实现走"成品契约" + 此 normalize 一并治理.
+    """
+    lines = markdown_text.splitlines()
+    if len(lines) < 3:
+        return markdown_text
+    # 找前 5 行中所有 `# ` 起头
+    h1_indices = [
+        i for i, ln in enumerate(lines[:8])
+        if ln.strip().startswith("# ") and not ln.strip().startswith("## ")
+    ]
+    if len(h1_indices) <= 1:
+        return markdown_text
+    # 保留第 1 个 H1，删除其余（仅当其它 H1 的文本 normalize 后与第 1 个或 expected_title 相同/相似）
+    first_idx = h1_indices[0]
+    first_text = lines[first_idx].strip()[2:].strip().lower()
+    expected_lc = expected_title.strip().lower()
+    keep = set(range(len(lines)))
+    for idx in h1_indices[1:]:
+        dup_text = lines[idx].strip()[2:].strip().lower()
+        if dup_text == first_text or dup_text == expected_lc:
+            keep.discard(idx)
+    return "\n".join(lines[i] for i in sorted(keep))
+
+
 def write_report(
     output_path: str | Path,
-    title: str,
-    content: str,
+    markdown: str | None = None,
+    title: str | None = None,
+    content: str | None = None,
 ) -> dict[str, Any]:
-    """把已生成的 markdown 内容写到磁盘（System 1：不调 LLM 不做生成）."""
+    """把 markdown 报告写到磁盘（**成品契约 + handler 后处理 normalize**, System 1, 不调 LLM）.
+
+    教训驱动:
+
+    旧实现是 "零件契约"——把单一产物 (markdown 文档) 拆成两个 required 字段
+    ``title`` + ``content`` 让 LLM 分别填, 且 handler 内拼 ``# {title}\\n{content}``.
+    Qwen3.7-max 实测 2 次都漏 ``title`` (短路失败 → 降级 React) + content 自带
+    ``#`` 导致 H1 重复 2 次. 不是模型 bug, 是接口契约引诱模型犯错.
+
+    新实现接受两种调用形态 (向后兼容):
+
+    1. **成品契约 (推荐)**: 只传 ``markdown`` 单字段 (完整 markdown 含 # 标题).
+       title 从 ``markdown`` 首个 H1 自动提取; 无 H1 则用 ``output_path.stem``.
+    2. **零件契约 (老调用方兼容)**: 传 ``title`` + ``content`` 双字段.
+       handler 自动拼接, 但仍跑 H1 去重 + bold→heading normalize.
+
+    无论哪种形态, handler 一律跑两道 System 1 normalize:
+       a. ``_normalize_bold_headings``: 独占一行的 ``**xxx**`` → ``## xxx``
+       b. ``_dedupe_leading_h1``: 防 H1 重复
+    """
     p = _normalize_path(output_path)
+
+    # 推断 markdown text + title (向后兼容两种形态)
+    if markdown is not None and markdown.strip():
+        # 成品契约
+        markdown_text = markdown
+        effective_title = _extract_h1_or_fallback(markdown_text, fallback=p.stem)
+        # 若 markdown 没有 H1, 自动在头部补一个 (从 fallback 推导)
+        if not _has_leading_h1(markdown_text):
+            markdown_text = f"# {effective_title}\n\n{markdown_text.strip()}\n"
+    elif content is not None and content.strip():
+        # 零件契约 (老调用方 / LLM 漏 title 时 fallback 用 output_path.stem)
+        effective_title = (title or "").strip() or _extract_h1_or_fallback(
+            content, fallback=p.stem,
+        )
+        # 若 content 已自带 H1, 不再外层套 # title (防 H1 重复 root cause)
+        if _has_leading_h1(content):
+            markdown_text = content.strip() + "\n"
+        else:
+            markdown_text = f"# {effective_title}\n\n{content.strip()}\n"
+    else:
+        return _golden_error(
+            "缺少报告内容: 必须传 ``markdown`` (成品契约, 推荐) 或 ``content`` (零件契约, 老路径)",
+            where=f"output_path={p}",
+            fixes=[
+                "推荐用法 (成品契约): write_report(output_path='r.md', markdown='# 标题\\n正文...')",
+                "兼容用法 (零件契约): write_report(output_path='r.md', title='标题', content='正文...')",
+            ],
+        )
+
+    # System 1 后处理 normalize (不靠模型自律)
+    markdown_text = _normalize_bold_headings(markdown_text)
+    markdown_text = _dedupe_leading_h1(markdown_text, expected_title=effective_title)
 
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        body = f"# {title}\n\n{content.strip()}\n"
-        p.write_text(body, encoding="utf-8")
+        p.write_text(markdown_text, encoding="utf-8")
     except OSError as e:
         return _golden_error(
-            f"写文件失败：{e}",
+            f"写文件失败: {e}",
             where=f"output_path={p}",
             fixes=[
                 "检查父目录是否存在 / 是否有写权限",
@@ -636,7 +749,17 @@ def write_report(
         "summary": f"报告已写入 {p}（{p.stat().st_size} 字节）",
         "output_path": str(p),
         "size_bytes": p.stat().st_size,
+        "effective_title": effective_title,
     }
+
+
+def _has_leading_h1(markdown_text: str) -> bool:
+    """前 5 行是否含独立 `# ` H1（不含 ## / ### 等）。"""
+    for line in markdown_text.splitlines()[:5]:
+        stripped = line.strip()
+        if stripped.startswith("# ") and not stripped.startswith("## "):
+            return True
+    return False
 
 
 # ============================================================
@@ -730,20 +853,48 @@ class DataAnalystToolPlugin:
             {
                 "name": "data_analyst_write_report",
                 "description": (
-                    "把已生成的 markdown 内容写到磁盘。"
-                    "LLM 应在调本工具前先把要写的内容凝练好。"
+                    "把已生成的 markdown 报告写到磁盘（成品契约：传整张 markdown 即可）。"
+                    "LLM 推荐用法：`markdown` 单字段传完整 markdown（含 `# 标题`），"
+                    "title 自动从首个 H1 提取（无 H1 用文件名 stem 兜底）。"
+                    "向后兼容：仍接受 `title` + `content` 双字段调用，handler 内自动 normalize。"
+                    "无论哪种形态，handler 一律跑 H1 去重 + 独占行 `**xxx**`→`## xxx` normalize。"
+                    ""
+                    " + lessons 2026-05-25-sdk-d1-gate-judge-decay-and-cookbook-feedback。"
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "output_path": {"type": "string"},
-                        "title": {"type": "string"},
+                        "output_path": {
+                            "type": "string",
+                            "description": "目标 .md 文件路径（绝对或相对）",
+                        },
+                        "markdown": {
+                            "type": "string",
+                            "description": (
+                                "（推荐）完整 markdown 正文，含 `# 标题`；"
+                                "handler 不再外层套 H1，避免标题重复。"
+                            ),
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": (
+                                "（可选, 仅老调用方）报告标题；若 markdown 已含 H1 可省略。"
+                                " optional 设计是为防 LLM 漏填 required → 短路失败"
+                                "（详 lessons 2026-05-25 §教训3）。"
+                            ),
+                        },
                         "content": {
                             "type": "string",
-                            "description": "完整 markdown 正文（不含 # 标题，标题走 title）",
+                            "description": (
+                                "（可选, 仅老调用方）markdown 正文；推荐改用 `markdown` 字段。"
+                            ),
                         },
                     },
-                    "required": ["output_path", "title", "content"],
+                    # required 仅保留无法 fallback 的字段 (output_path)。
+                    # title/content/markdown 任一非空即可，handler 内自动推导:
+                    #   - markdown 优先（成品契约）
+                    #   - title+content 兼容（零件契约，handler normalize）
+                    "required": ["output_path"],
                 },
                 "handler": write_report,
             },

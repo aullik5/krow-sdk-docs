@@ -1,12 +1,10 @@
 # Krow Agent SDK · 5 分钟 Quickstart
 
 > 本教程让你在 5 分钟内用 Krow Agent SDK 跑一个真实 LLM hello-world，不需要桌面 app、不需要修改 krow 主仓代码。
->
 > **进阶资料**：
 > - [`api-reference.md`](./api-reference.md) — 完整 API 手册（15 章 / 57 子节）
 > - [`advanced-development-guide.md`](./advanced-development-guide.md) — TURBO 哲学 / 工具设计 / 测试方法论
->
-> **适用版本**：`krow-agent-sdk >= 0.8.12.11`（W5 closeout：cookbook real LLM E2E user-value oriented 多维断言 + 5 P0 bug 治本 + krow-sdk-install PyPI prod 上线 + 三 cookbook 多次 stable PASSED）。
+> **适用版本**：`krow-agent-sdk >= 0.8.12.28`。
 
 ---
 
@@ -25,14 +23,15 @@
 
 > **当前发布状态**（2026-05-19 W5 closeout）：✅ **PyPI 三件套全齐**：
 > ```bash
-> pip install krow-agent-sdk==0.8.12.11        # 公开 SDK（plugin protocol + facade）
-> pip install krow-sdk-install==0.8.12.11      # runtime 安装 CLI（W5 首次 PyPI prod）
+> pip install krow-agent-sdk==0.8.12.28        # 公开 SDK（plugin protocol + facade · hotfix 28 ai_search 注册修复）
+> pip install krow-sdk-install==0.8.12.11      # runtime 安装 CLI（W5 首次 PyPI prod，CLI 自身无 hotfix 28 影响）
 > krow-sdk-install --api-key $KROW_API_KEY     # 走 prod gateway 拉 sdk-runtime wheel
 > ```
-> sdk-runtime 0.8.12.10 已可装（W4 closeout）；0.8.12.11 prod publish 进行中（tag `runtime-v0.8.12.11`）。
+> sdk-runtime 0.8.12.28 已可装（hotfix 28 entry-agnostic ai_search 注册修复 · `runtime-v0.8.12.28` tag → TOS prod 已发布；
+> 9 wheel matrix 含 P0 tool registration smoke step 守门，确保 wheel-only Pod 部署后 `AgentBuilder().build()`
+> 完成时 `ai_search` 等 4 个 P0 工具一定注册到 `ToolManager`）。
 > EULA 当前为 v1.1 DRAFT（含 good-faith 披露），等真律师签字后转 EFFECTIVE
 > （详 [`roadmap.md`](./roadmap.md) Step 2 P2）。
->
 > 下文 §1.1-§1.2 是 **Krow team collaborator** 的开发模式入门（monorepo / dev wheel）；
 > 外部开发者请直接用 §1.0 的 `pip install krow-agent-sdk`。
 
@@ -42,7 +41,8 @@
 pip install krow-agent-sdk                 # 13 项必需依赖
 pip install "krow-agent-sdk[office]"       # +24 项 docx/pptx/excel/pdf
 pip install "krow-agent-sdk[visual]"       # +4 项 cairosvg/cairocffi（PPTX 视觉质检，需系统库 libcairo2 + libpango，详 §4.5.1）
-pip install "krow-agent-sdk[knowledge]"    # +4 项 networkx/jieba
+pip install "krow-agent-sdk[ontology]"     # +4 项 networkx/jieba/python-louvain/beautifulsoup4 (新 ontology 管线: wiki + graph + extractive)
+# pip install "krow-agent-sdk[knowledge]"  # DEPRECATED alias → [ontology], 0.10 移除
 pip install "krow-agent-sdk[remote]"       # +8 项 fastapi/uvicorn/websockets
 pip install "krow-agent-sdk[all]"          # 一站式全装
 ```
@@ -57,7 +57,7 @@ python -c "from krow_agent_sdk import AgentBuilder; print('SDK OK')"
 ### 1.1 Collaborator 模式：克隆 krow 主仓 + 装 SDK extras
 
 ```bash
-# (内部 monorepo 私有；外部开发者请用 pip install)
+git clone https://github.com/aullik5/krow.git
 cd krow
 python -m venv .venv
 .venv\Scripts\activate           # Windows
@@ -445,7 +445,7 @@ from krow_agent_sdk.experimental.protocols import (
 
 ## 4.5 PPTX 视觉质检：用 `visual_inspect` 让 VLM 给你的 PPT 打分
 
-> PR-7 (`docs/governance/pptx-geometry-quality-roadmap.md` Batch 3, 2026-05-16)：headless 环境下 SDK 用户**一行**接入 PPTX 视觉质检。
+> PR-7 ：headless 环境下 SDK 用户**一行**接入 PPTX 视觉质检。
 
 ### 4.5.1 依赖准备
 
@@ -535,6 +535,45 @@ result = visual_inspect(pptx_path, expectation="...")
 | `visual_inspect` 返回 `render_available=false` | 系统库 libcairo2 / libpango 缺 | 按 §4.5.1 装系统库 |
 | 中文字体显示成 □ | 缺 CJK 字体 | Linux: `apt install fonts-noto-cjk`；macOS 自带；Windows 装"思源黑体" |
 | `render_fidelity_class=layout_only` 且 VLM 报"图标对不上" | 非 PISMA-SVG 来源走 `ooxml_to_svg` 兜底 | 已是预期行为；图标位置 OK 但纹理可能丢失 |
+
+---
+
+## 4.6 内置 `ai_search` 联网搜索：自动快速路径（PR-2 起，**零代码改动**）
+
+> v0.8.12.25 起：当 Agent 判定**纯信息检索任务**（用户只要事实 / 答案 / 资讯 / 新闻，
+> 无需文件交付、无需二次分析、无需综合汇聚）时，SDK 自动跳过最终 LLM summary 改写，
+> 把 `ai_search` 工具产出的 Markdown 答案**原样**作为 `result.final_output`
+> （保留 `[1][2]` 引用脚标 + 自动拼接的来源列表）。
+
+**用户感知**（零代码改动）：
+
+- ✅ **延迟降低**：单步搜索任务从 ~167s（4 次 LLM 调用）→ ~30-50s（3 次 LLM 调用，省 1 次 summary）
+- ✅ **格式保真**：搜索答案保留搜索引擎原始 Markdown 格式 + 引用脚标，不被 LLM 改写成 "任务报告体"
+- ✅ **来源可见**：`ai_search.answer` 自动追加 Markdown "参考来源" 列表（结构化 `sources` 字段也保留供下游消费方继续用）
+
+```python
+result = agent.run("OpenAI 最近发布了什么模型？")
+print(result.final_output)
+# 输出包含:
+# - 自然语言答案（带 [1][2][3] 引用脚标）
+# - Markdown "## 参考来源" 列表（每条含标题 + URL）
+```
+
+**适用场景**（LLM 在 plan_task 自动判定）：
+
+| 任务 | 是否走快速路径 |
+|---|---|
+| "OpenAI 最近发布了什么模型？" | ✅ 走（纯信息检索） |
+| "Python 3.13 发布了吗？" | ✅ 走（纯事实查询） |
+| "AGI 实现路径有哪些？" | ✅ 走（咨询/科普类） |
+| "搜索 Anthropic 信息，写一份分析报告到 /tmp/x.md" | ❌ 不走（需要文件交付） |
+| "搜索新闻并与历史数据对比、给出趋势结论" | ❌ 不走（需要二次综合分析） |
+
+**机制概览**（开发者无需关心，仅供可观测性参考）：
+
+- 短答案（200-500 chars）+ LLM 显式声明 `primary_deliverable_step=ai_search` → 系统按 `≥50 chars` 最低门槛直接采用（不会因"看起来太短"被降级到 summary 改写）
+- 长答案（>500 chars）走启发式路径——任意"重路径工具产出"都可能被直出（保持 PR-D #488 已有行为）
+- 真实 LLM E2E 见 `tests/sdk/test_ai_search_fast_path_real_llm.py`（3 个场景：fast 短答案 / news 中等答案 / negative 文件生成任务）
 
 ---
 

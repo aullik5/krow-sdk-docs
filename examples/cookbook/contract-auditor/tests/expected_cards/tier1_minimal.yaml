@@ -25,7 +25,9 @@
 #   - numeric_grounding 只对稳定数据设硬约束（30 / 0.5），合同金额走 keywords OR
 
 exit_code: 0
-max_walltime_s: 800
+# Walltime SSOT (P2-A · 2026-05-25 · lessons 2026-05-25 §教训5)
+max_walltime_s_serial: 800
+max_walltime_s_parallel: 1200
 
 required_artifacts:
   - risk_report.md

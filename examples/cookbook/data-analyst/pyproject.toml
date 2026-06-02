@@ -30,6 +30,13 @@ ml = [
 test = [
     "pytest>=8.0",
     "pytest-timeout>=2.2",
+    # journey_e2e expected_card 读取（PR 2026-05-26 加 journey_e2e 同步引入；
+    # 与 financial-analyst / literature-reviewer 同源 SSOT 模式）
+    "PyYAML>=6.0",
+]
+# Observability extras (cookbook journey 真烧 LLM 时输出 reportlab PDF 等)
+obs = [
+    "reportlab>=4.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -53,3 +60,9 @@ include = [
     "pyproject.toml",
     ".gitignore",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# 与 financial-analyst / literature-reviewer 同源
+addopts = ["-v", "--tb=short"]
+

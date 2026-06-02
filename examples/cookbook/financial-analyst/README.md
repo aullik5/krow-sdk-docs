@@ -169,6 +169,32 @@ contract-auditor demo 演示 **OpenTelemetry**（企业法务侧主流），两�
 
 ---
 
+## 模型适配性（**qwen3.7-max 已知漂移 + 缓解** · P1-B · 2026-05-25）
+
+> 开发者 2026-05-25 反馈：``qwen3.7-max`` 投资简报偶发把章节标题写成
+> 独占行 ``**业务概览**`` 而非标准 ``## 业务概览`` → ``DisclosureCompletenessGate``
+> 因找不到 ``##`` 段触发 BLOCK + 重试 1-2 次（多耗 ~3000 token / journey）。
+
+**缓解**（``sdk-v0.8.12.30+``）：
+
+1. ``act_assets/financial_analyst/ext_financial_analyst.md`` §6.1 加 markdown 格式铁律段
+   + ✅/❌ 反模式表 → System 2 prompt 引导 LLM
+2. ``DisclosureCompletenessGate`` System 1 闸门保持原状 → 即使 LLM 写错也会被 BLOCK 重写
+3. 推荐生产任务用 ``opus-4.6`` 或 ``deepseek-v4-pro``；``qwen3.7-max`` 适合 dev 自测
+
+**模型选择指南**（按场景）：
+
+| 场景 | 推荐 model | 原因 |
+|---|---|---|
+| 客户付费投资简报 | ``opus-4.6`` | 章节格式 + 数值引用最稳定 |
+| 法务 / 合规高敏感 | ``deepseek-v4-pro`` | 风险段最严谨 + 0 编造 |
+| nightly CI | ``krow-llm`` | 经济 + cloud-available + 章节稳定 |
+| dev 自测 / 反复迭代 | ``qwen3.7-max`` | 成本最低；接受 1-2 次 Gate 重试 |
+
+详 ``cookbook/README.md`` "模型适配性" 段 +。
+
+---
+
 ## 测试
 
 ```bash

@@ -1,0 +1,106 @@
+# data-analyst Tier 1 最小跑（合规审计 + 异常检测 + markdown 报告）
+#
+# 跑法：python main.py sample_data/titanic.csv --audit --quiet
+#
+# 用户价值优先（参 financial-analyst W5 模式）
+# ════════════════════════════════════════
+#
+# 数据审计对用户（数据分析师 / 合规官）的核心价值：
+#   1. 报告里的统计数字必须**来自原始 CSV**（不能编造）→ ``numeric_grounding``
+#   2. 报告必须**结构化**（数据概览/数值/分类/异常/相关性/合规建议 6 段）→ ``markdown_structure``
+#   3. 报告必须**给出明确合规结论**（PII / 异常 / 数据质量风险）→ ``must_address``
+#   4. 报告**不能鬼打墙**（重复段落让用户体验灾难）→ ``max_repeated_paragraphs``
+#
+# 输入数据（来自 sample_data/titanic.csv，固定 20 行）
+# ════════════════════════════════════════════════════
+#   行数: 20
+#   数值列: PassengerId / Age / Fare / Pclass / Survived / SibSp / Parch
+#   分类列: Name / Sex / Ticket / Cabin / Embarked
+
+exit_code: 0
+
+# Walltime SSOT (P2-A · 2026-05-25):
+# data-analyst tier1 较 financial-analyst 简单（无 PDF parsing / valuation），
+# 但 --audit 流程包含 6 步（read_csv + compute_stats + detect_anomalies +
+# compute_correlation + pick_palette + write_report），LLM 调用次数 ~20-30 次.
+max_walltime_s_serial: 600
+max_walltime_s_parallel: 900
+
+required_artifacts:
+  - titanic_report.md
+
+# ──────────────────────────────────────────────────
+# 维度 1（功能可用性）：基础字节量 + 关键词
+# ──────────────────────────────────────────────────
+min_artifact_bytes:
+  titanic_report.md: 600
+
+required_keywords_in:
+  titanic_report.md:
+    - ["Age", "年龄"]
+    - ["Sex", "性别"]
+    - ["统计", "Statistics", "概况"]
+    - ["异常", "Anomaly", "outlier", "离群"]
+
+# 数据审计禁止主观夸大 / 编造细节
+forbidden_keywords_in:
+  titanic_report.md:
+    - "100% 准确"
+    - "毫无瑕疵"
+    - "完美无缺"
+
+# ──────────────────────────────────────────────────
+# 维度 2（数据 grounding · W5 模式）：报告必须含真实 CSV 统计数字
+# ──────────────────────────────────────────────────
+numeric_grounding:
+  titanic_report.md:
+    # 数据集 20 行（绝对硬约束 — LLM 应从 read_csv 拿到）
+    - {value: 20, tolerance: 0.0}
+
+# ──────────────────────────────────────────────────
+# 维度 3（markdown 结构 · W5 模式）：6 段标准合规报告
+# ──────────────────────────────────────────────────
+markdown_structure:
+  titanic_report.md:
+    # 6 段标准披露 → 至少 5 个 H2（容忍 LLM 偶尔合并 2 段）
+    min_h2_sections: 5
+    no_duplicate_h2: true
+
+# ──────────────────────────────────────────────────
+# 维度 4（用户决策问题 · W5 模式）：报告必须给合规结论
+# ──────────────────────────────────────────────────
+must_address:
+  titanic_report.md:
+    # 必须含数据质量评估（缺失 / 异常 / 完整性）
+    - question: "数据质量评估"
+      any_keywords:
+        - "缺失"
+        - "Missing"
+        - "完整性"
+        - "completeness"
+        - "数据质量"
+        - "data quality"
+        - "异常"
+        - "anomaly"
+        - "outlier"
+        - "离群"
+    # 必须含合规建议或风险提示
+    - question: "合规建议 / 风险提示"
+      any_keywords:
+        - "建议"
+        - "recommendation"
+        - "风险"
+        - "risk"
+        - "合规"
+        - "compliance"
+        - "审计"
+        - "audit"
+        - "注意"
+        - "改进"
+        - "improve"
+
+# ──────────────────────────────────────────────────
+# 维度 5（重复段落检测 · W5 模式）
+# ──────────────────────────────────────────────────
+max_repeated_paragraphs:
+  titanic_report.md: 0

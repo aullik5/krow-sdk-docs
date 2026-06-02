@@ -2,7 +2,6 @@
 
 > **维护者**：每完成一个 Wave / Phase 后更新本文件（不要把 roadmap 内容回写到 AGENTS.md，本文件是 roadmap SSOT）。
 > **决策原则**：Step 1 完成后才进 Step 2；Step 2 落地后才考虑 Step 3+。
->
 > **元规则提示**：roadmap 内容**只放本文件**，AGENTS.md 只放 1 行指针（避免 god file 反弹）。
 
 ---
@@ -116,7 +115,7 @@
 - ✅ Step 2 P1（`with_default_model`→6 个 `with_<cat>_model`（chore/sdk-model-selection-api 2026-05-15）/ `with_replay_store` / `MCPServerPlugin` form-C）全部完成
 - ✅ Step 2 P1 `Agent.run_stream()` 流式 API（PR #316，2026-05-15）：`StreamItem` envelope + 同步生成器 + 20 unit tests + CI smoke 防回归
 - ✅ Step 2 P2 visual_inspect plugin 完整公开（PR #239，2026-05-13）
-- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详 ``eula-mock-legal-review-feedback.md` (internal design doc)`
+- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详 [`eula-mock-legal-review-feedback.md`](./eula-mock-legal-review-feedback.md)
 - 🚧 Step 2 P2 EULA 后续阻塞：(a) 商务决策 3 项（governing law / liability floor / consent 机制 mandatory level）；(b) 持证律师签字（建议中国大陆 + 香港双 review，~14 天）；(c) Cloud 端 + CLI 端同意机制实施
 - 🚧 Step 2 P2 剩余：`domain pack ontology editor + custom entity 抽取`；视外部团队反馈优先度决定开工时机
 - ❌ Step 2 BYO LLM provider 已决策不做（见上表注释）

@@ -24,9 +24,22 @@
 #   - LLM 实际综述用 paper 标题 / 简称（"GNN-Rec" / "Contrastive-Seq"）
 #     而不是 [1]/[2] 编号 → keywords 接受标题片段
 #   - LLM 用 "complementary / different" 表达对比关系（不一定写"对比/比较"）
+#
+# opus-4.6 实测扩展（2026-05-27 · PR #624 · 本地真烧 LLM 4 run 2 fail mode）：
+#   - Fail mode A: opus-4.6 习惯用 paper_id 格式引用（如 ``(paper_gnn_recsys, 2023)``
+#     / ``[paper_contrastive_seq]`` / 参考文献 ``1. paper_gnn_recsys (2023)``）
+#     —— 完全合规学术写法，应纳入 keyword 集合，避免 strict enforcement gap
+#     反模式（AGENTS.md §0.1）.
+#   - Fail mode B: plan 步骤重复执行 → smart_file_write 没真调 → output 空,
+#     exit_code=1. 已通过 ``_journey_e2e_helpers.run_journey`` 内置 retry 兜底.
 
 exit_code: 0
-max_walltime_s: 800
+# Walltime SSOT (P2-A · 2026-05-25 · lessons 2026-05-25 §教训5):
+# 开发者 zzp 2026-05-25 真跑 846s 超 800s 失败案例直接驱动. parallel 跑时
+# CPU/网络/LLM TPM 争抢必然偶发超阈, 不应作 System 1 硬闸断言 (违反 §0.0
+# 速度是第 3 优先级). assert_journey 自动检测 PYTEST_XDIST_WORKER + 3 套 env SSOT.
+max_walltime_s_serial: 800
+max_walltime_s_parallel: 1200
 
 required_artifacts:
   - literature_review.md
@@ -42,10 +55,18 @@ required_keywords_in:
     # 必须提及主题领域（任一）
     - ["graph neural network", "图神经网络", "GNN", "图网络"]
     - ["contrastive", "对比学习", "对比", "self-supervised", "自监督"]
-    # 必须含引用形式（标题 / 简称 / 编号 任一）
+    # 必须含引用形式 / paper grounding 信号（任一）
+    # 2026-05-27 PR #624 扩展三类合规变体（防 strict enforcement gap 反模式）:
+    #   1) 数字编号 / 作者括号 / 简称 / 完整标题 (旧版)
+    #   2) opus-4.6 paper_id 变体 (paper_xxx) — 合规学术写法
+    #   3) paper grounding 信号 — LLM 写出的实验数据集 / 基线模型 / 性能数字
+    #      证明 LLM 真读了源论文 (不胡编). 这是更鲁棒的"真用了源数据"判据.
     - ["[1]", "[2]", "(Smith", "(Liu", "(Wang", "GNN-Rec", "Contrastive-Seq",
        "Graph Neural Networks for Recommendation",
-       "Contrastive Learning for Sequence"]
+       "Contrastive Learning for Sequence",
+       "paper_gnn_recsys", "paper_contrastive_seq", "(paper_",
+       "MovieLens-1M", "Amazon-Books", "BPR-MF", "SASRec",
+       "8.5%", "5.2%", "Hit@10"]
 
 # 学术综述禁止主观夸大词
 forbidden_keywords_in:

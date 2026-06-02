@@ -93,4 +93,4 @@ pytest tests/ -v -s        # 无 KROW_API_KEY 时 journey 自动 skip
 ```
 
 详见 `act_assets/knowledge_wiki_studio/ext_knowledge_wiki_studio.md`（完整工作流 +
-反模式）。
+反模式）与 `COOKBOOK_DESIGN.md` §2.4。

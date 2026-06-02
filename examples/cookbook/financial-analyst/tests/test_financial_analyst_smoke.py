@@ -341,6 +341,9 @@ def test_act_plugin_act_root_exists() -> None:
     root = plugin.get_act_root()
     assert root.is_dir()
     assert (root / "ext_financial_analyst.md").is_file()
+    assert (root / "__act__.yaml").is_file(), (
+        "ACT manifest 必须是独立 __act__.yaml（loader 不读 .md frontmatter）"
+    )
 
 
 def test_act_plugin_tool_names_includes_word_smart_export() -> None:

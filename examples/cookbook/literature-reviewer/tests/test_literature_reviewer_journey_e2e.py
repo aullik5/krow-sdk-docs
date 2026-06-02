@@ -51,10 +51,9 @@ if str(_COOKBOOK_ROOT) not in sys.path:
     sys.path.insert(0, str(_COOKBOOK_ROOT))
 
 from _journey_e2e_helpers import (  # noqa: E402
-    assert_journey,
+    assert_journey_with_retry,
     load_expected_card,
     require_real_llm,
-    run_journey,
     synthesize_research_paper_pdf,
 )
 
@@ -92,8 +91,11 @@ def test_literature_reviewer_tier1_journey(tmp_path: Path) -> None:
     # 到默认 ``literature_review.md`` 名（LLM 用了短名直觉）.
     # 解决方案：用 main.py 默认 ``review_topic="literature_review"``，
     # 且 expected_card 同步用 ``review_literature_review.md``.
-    # 长远：要让 main.py 的文件名 prompt 强制约束（见 docs/lessons/...）.
-    result = run_journey(
+    # 长远：要让 main.py 的文件名 prompt 强制约束.
+    card = load_expected_card("tier1_minimal.yaml", cookbook_dir="literature-reviewer")
+    # PR #624 (2026-05-27): retry 兜底 fail mode A (paper_id/grounding 抖动)
+    # + fail mode B (plan 重复执行 → smart_file_write 没真调 → output 空)
+    assert_journey_with_retry(
         cookbook_dir="literature-reviewer",
         argv=[
             str(paper1), str(paper2),
@@ -104,9 +106,7 @@ def test_literature_reviewer_tier1_journey(tmp_path: Path) -> None:
             "--budget-replans", "1",
             "--similarity-threshold", "0.05",  # 让 2 篇也能聚类（合成数据相似度低）
         ],
+        card=card,
         cwd=tmp_path,
         timeout_s=900,
     )
-
-    card = load_expected_card("tier1_minimal.yaml", cookbook_dir="literature-reviewer")
-    assert_journey(result, card=card)

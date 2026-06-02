@@ -2,15 +2,12 @@
 
 > 给"已读完 [`quickstart.md`](./quickstart.md)、写过第一个 plugin"的外部开发者。
 > 本文档解释**写 plugin 的实战最佳实践**，让你的 plugin 能与 SDK 主路径协同得当（不撞规则、不翻车、不踩坑）。
->
 > 阅读节奏：约 60 分钟通读 + 写 plugin 时按需回查。
->
 > 本文档与 SDK 主仓内部使用的 [`AGENTS.md`](https://pypi.org/project/krow-agent-sdk/) 元规则同源（提炼对外公开级内容）。
 
 > **本文档与 [`concepts/`](./concepts/) 目录的边界**（按 [Diátaxis](https://diataxis.fr/) 框架）：
 > - 本文档 = **How-to**（"应该怎么写好 plugin"）— 实战最佳实践 + 反模式
 > - [`concepts/`](./concepts/) = **Explanation**（"krow 内部如何工作 / 为什么这样设计"）— Agent lifecycle / Progressive Execution / Budget / ConcludeGuard / ExperienceMemory
->
 > 两者互补，不重复。如果你想理解机制而不仅仅是"按规矩写"，先去看 `concepts/`。
 
 ---
@@ -133,6 +130,112 @@ ToolPlugin 内部**绝不能** `import openai` / `import httpx` 调 LLM。这违
 **举例 2**：判断"用户输入语义上是否在抱怨产品" → 需要理解 → System 2
 **举例 3**：把 markdown 转 HTML → 确定性映射 → System 1（用 markdown 库）
 **举例 4**：写一个段落总结 → 创意生成 → System 2
+
+### 1.6 LLM-first 三件套（**Krow Agent 核心架构选择**）
+
+> 来自 2026-05-25 ppt-master 700 行 vs PISMA-SVG 5万行补丁的元复盘。这是 TURBO 哲学的**实施层最佳实践**——写完整套 plugin 后回看这一节做对照检查。
+
+**核心信念**：**LLM 能力在快速进步, 你的 plugin 代码量应在收缩, 而不是膨胀**.
+
+#### 第 1 件: finished artifact 输入
+
+给 LLM 的应当是**可直接复用的产物**, 不是构建产物所需的零件.
+
+| ❌ building blocks (LLM 自己拼) | ✅ finished artifact (LLM 复用) |
+|---|---|
+| 返回结构化 JSON `{geometry: {center_x: 480, ...}}` 让 LLM 拼 SVG | 返回完整 SVG 段 `<line x1="480" y1="120" .../>` 让 LLM COPY |
+| Hint: "请配色避免撞色" + 调用 `pick_color_pair(...)` 工具 | Hint: "已选色: `fg=#1a3c6e, bg=#ffffff (contrast=8.4)`, 请直接用" |
+| 文档说明 + 多个工具组合 | 一个 markdown 段 LLM 直接 30s 完成 |
+
+**判定**: LLM 看完是否 **30 秒内能产出最终结果**? 是 → finished artifact. 否 → building blocks.
+
+#### 第 2 件: post-hoc gate (验证 + fail-loud)
+
+System 1 闸门只 **验证 + 报错**, **不**替 LLM 修复.
+
+```python
+# ❌ syntax 代偿 (替 LLM 改完, silent continue)
+def normalize_svg(svg: str) -> str:
+    return svg.replace("&", "&amp;")  # 自动补 LLM 漏的 escape
+
+# ✅ post-hoc gate (验证 + 报错让 LLM 重做)
+def validate_svg(svg: str) -> Optional[ToolError]:
+    try:
+        lxml.fromstring(svg.encode(), parser=lxml.etree.XMLParser(recover=False))
+        return None
+    except lxml.etree.XMLSyntaxError as e:
+        return ToolError(
+            code="LLM_SVG_NOT_WELL_FORMED",
+            message=f"❌ SVG 不合法 (line {e.lineno} col {e.offset}). 请检查 & 是否转义为 &amp;, 标签是否闭合.",
+        )
+```
+
+**判定**: 出错时, 系统是 **告诉 LLM 错了让它重做** 还是 **替 LLM 改完静默 continue**? 前者 = 真 gate; 后者 = syntax 代偿.
+
+#### 第 3 件: vendor 风格库
+
+用 markdown 参考库 + SSOT 锚定 LLM 风格, 不靠 python 算法.
+
+```
+your_plugin/
+├── refs/
+│   ├── style_modern.md      # vendor 风格 1: 现代极简
+│   ├── style_business.md    # vendor 风格 2: 商务深沉
+│   └── style_creative.md    # vendor 风格 3: 创意活泼
+├── spec_lock.md.template    # SSOT 模板: 主色 / 字号 / 品牌锚
+└── tool_load_vendor.py      # 工具: LLM 调它选 vendor + 注入 prompt
+```
+
+LLM 流程: `tool_load_vendor(style="modern")` → 工具返回 `refs/style_modern.md` 完整 markdown → LLM 看完 COPY + 改文本/颜色锚定 `spec_lock.md`.
+
+**对照**: 不要写一个 `python_style_engine.py` 算法自动选风格 + 生成 — 这是 building blocks + syntax 代偿双反.
+
+### 1.7 度量指标: syntax/semantic 比 (plugin 健康度)
+
+```
+syntax_semantic_ratio = (你 plugin 月度新增 python LOC) / (LLM 月度 token 消耗 / 1000)
+```
+
+| 比值 | 健康度 | 你该做什么 |
+|---|---|---|
+| < 0.5 | ✅ LLM-first 健康 | 继续维持 |
+| 0.5 - 2.0 | ⚠️ 警告 | retrospect "这些补丁是否替代了 LLM 决策" |
+| > 2.0 | ❌ syntax 代偿失控 | 强制 retrospect + 撤补丁路线图 |
+
+**举例** (反模式触发器): 你的 plugin 上月加了 800 行 python 但只多花了 100k token (ratio = 8.0) → 强警告. 说明你在用 python 替 LLM 做事.
+
+### 1.8 升级 LLM 模型时的强制复检
+
+每次 LLM 模型 major version bump (qwen3.6 → qwen3.7 / claude-4.6 → claude-5.0 等):
+
+1. **全量回归补丁层** — 跑 syntax/semantic 比历史趋势
+2. **选 N 个补丁做 A/B** — 开 vs 关, 关掉后 LLM 输出是否还达标
+3. **撤掉所有"能撤"的补丁** — 开 PR 独立 review
+4. **沉淀复检报告** 到
+
+**铁律**: 模型升级周期是**撤补丁的窗口**, 不是堆补丁的窗口.
+
+### 1.9 反模式 D-G (来自 ppt-master 元复盘)
+
+#### 反模式 D: "Syntax 代偿 Semantic" (主反模式)
+
+用确定性 python 算法 / 后处理替 LLM 做语义/审美/创意决策, 累计 N 个补丁 = LLM 边界被持续侵蚀.
+
+铁证: PISMA-SVG 5万行 vs ppt-master 700 行, 视觉效果反胜 1.9-2.0×.
+
+#### 反模式 E: "补丁累积惯性"
+
+升级 LLM 模型时不撤旧补丁, 让 LLM 进步红利被代码层困住.
+
+#### 反模式 F: "building blocks 反 finished artifact"
+
+给 LLM 喂工具输出零件 JSON 让它自己拼装, 而非可 COPY VERBATIM 的完整产物.
+
+#### 反模式 G: "覆盖率绿但视觉差"
+
+单元测试 100% 绿但视觉/语义级 metric 持续逊于 baseline (没人测整体输出质量).
+
+**判定铁律**: 任何 LLM-facing 模块必须有**视觉/语义级 metric** (字数 / 元素密度 / 像素 diff / NPS / ...) 作为 PR 验收门, 不只看代码 coverage.
 
 ---
 
@@ -360,6 +463,24 @@ Error: invalid argument
 - ❌ 工具数 > 5 共享同一动词 → 合并 + 参数分流
 - ❌ 输出嵌套 3 层以上 JSON → 平铺
 - ❌ 错误信息只说 "failed" → 黄金模板（含可执行修法）
+- ❌ **零件契约反模式**：把一个产物拆成 N 个 `required` 字段让 LLM 分别填（详 §3.7.1）
+
+### 3.7.1 成品契约 vs 零件契约（**input_schema 设计核心原则**）
+
+> 由 zzp 团队 2026-05-25 cookbook 真跑反馈驱动；"教训 3"。
+> 完整可执行 checklist + 双侧对照代码示例： glob 自动注入到 LLM 编辑 plugin 时）。
+
+LLM 调你工具时填的 `arguments` 是**契约**。契约有两种形态：
+
+| 契约类型 | 示例 | 模型友好度 |
+|---|---|---|
+| **成品契约**（finished artifact） | `write_doc(markdown_text: str)` | ✅ 高 — LLM 直接写完整 markdown 即可 |
+| **零件契约**（building blocks） | `write_doc(title: str, content: str)` + 注释「content 不含 #」 | ❌ 低 — LLM 想"自己写完整 markdown"是本能, 注释约束不可强制 |
+
+**铁律**：
+- `required` 越多越脆——只列**没有合理 default、不能从其他字段推导**的字段
+- 能从其他字段 fallback 推导的（如 `title` 可提 `content` 首 H1 / `output_path.stem`） → 改 optional + handler 内自动推导
+- 涉及**纯系统侧 normalize** 的事（如独占行 `**xxx**` → `## xxx` / 去重 H1） → handler 内做后处理，**不靠 LLM 自律**
 
 ### 3.8 实战 checklist（写完 ToolPlugin 后过一遍）
 
@@ -370,6 +491,9 @@ Error: invalid argument
 - [ ] 错误都用黄金模板？
 - [ ] 加新功能的接口能向后兼容吗？
 - [ ] unit test 100% 覆盖（System 1 应该可以做到）？
+- [ ] **input_schema `required` 列表是不是"没有合理 default 也不能从其他字段推导"**？
+- [ ] **description 里有没有写"模型必须 / 模型不要"这类语义约束**？若有 → 抽出来在 handler 里做 System 1 闸门（normalize / fallback）
+- [ ] **cookbook unit test 是否 mock 了"LLM 漏 required 字段"场景** → 断言 handler fallback 仍能产出可接受产物？
 
 ---
 
@@ -392,6 +516,58 @@ my_plugin/
     extended.md               # 详细 hint（可选；按需加载）
     summary.md                # 简短摘要（必；hot path 注入 prompt）
 ```
+
+**🔥 重要：extended.md 工具文档的两种写法（2026-05-27 PR-1/PR-2 新增）**
+
+micro ReACT Phase-2 prompt 需要从 extended.md 提取**每个工具的完整契约**
+（参数 / 输出 / 门禁）。SDK 解析器同时支持两种写法：
+
+| 写法 | 适用场景 | 解析方式 |
+|---|---|---|
+| **写法 A（推荐）**：`### tool_name` heading + 参数表 + JSON 示例 | 工具数 ≤ 10，每工具有独立详细说明 | `_parse_extended` 主路径（精确） |
+| **写法 B（兼容）**：markdown 表格列工具，cell 用反引号包围工具名 | 工具数 > 10，需要并排展示 step / phase / 门禁 | `_parse_extended_table_fallback`（自动识别） |
+
+**两种写法对照范例**：
+
+写法 A（参见主仓 `modules/agent/act/acts/native_fileops/extended.md`）：
+
+```markdown
+### data_analyst_read_csv
+
+读取 CSV 元数据 + 前 10 行预览。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| path | string | 是 | 文件路径 |
+| max_rows | integer | 否 | 预览行数（默认 10） |
+
+```json
+{"tool_name": "data_analyst_read_csv", "tool_args": {"path": "data.csv"}}
+```
+```
+
+写法 B（适合复杂工程化 ACT，参见 cookbook `ext_data_analyst.md`）：
+
+```markdown
+## Phase 1 工具调用契约（按 step 排）
+
+| Step | 工具 | 输入参数（精确名） | 输出字段 / 门禁 |
+|---|---|---|---|
+| 1 | `data_analyst_read_csv` | `path: str`, `max_rows: int=10` | `columns`, `dtypes`, `row_count` |
+| 2 | `data_analyst_compute_stats` | `path`, `columns: list[str]` | `stats[col].{mean, std, min, max}` |
+```
+
+**判定准则**：
+
+- 工具 ≤ 5 + 每工具有 10 行以上 know-how → **写法 A**
+- 工具 > 10 + 工程化跨步骤契约（step / phase / 门禁矩阵）→ **写法 B**
+- 两种**可同时用**（写法 A 章节会覆盖写法 B 表格行；SDK 优先 heading）
+
+**⚡ 自动文档兜底（2026-05-27 PR-1）**：如果你只在 `ToolPlugin.get_tools()` 里
+声明了 `input_schema`，SDK 会**自动**用 `ACTDocGenerator` 生成 `### tool_name +
+参数表 + JSON 示例` 注入到 extended.md 末尾 —— **不用在 ACT markdown 里再写一遍参数表**。
+你只需在 ACT extended.md 里写"跨工具约束 / 工作流 / 门禁"等 System 2 内容。
+详 §4.9。
 
 ### 4.3 `__act__.yaml` 写法
 
@@ -465,34 +641,85 @@ intent_description: 学术文献处理工具集。   # 太抽象，LLM 不知道
 
 - 不要在 summary.md 里写长篇逻辑 → 写到 `extended.md`
 - 不要把每个工具的全部参数列出来 → ToolManager 会自动注入工具签名
+  （默认 500 字符上限覆盖 95% 工具；超长 schema 工具建议在 `extended.md`
+  写法 A 里手写完整参数表 —— 详 §4.6 + §4.9）
 - 用 markdown 表格让 LLM 一眼扫到
 
 ### 4.6 写 `extended.md`（按需加载）
 
 **目标**：当 LLM 在某个具体任务上需要详细 know-how 时按需读。
 
+#### 4.6.1 写法 A：`### tool_name` heading 风格（推荐）
+
 ```markdown
 # 📚 科研论文助手 — 详细规则
 
-## 何时调 `read_pdf`
+### read_pdf
 
-- 用户给了 arxiv URL → `read_pdf(url)` 直接读
-- 用户给了本地路径 → `read_pdf(path)`
-- PDF 含大量公式 → 加 `mode="ocr_with_math"`
+读取 PDF 文本（自动 OCR 兜底）。
 
-## BibTeX 抽取最佳实践
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| path_or_url | string | 是 | 本地路径或 arxiv URL |
+| mode | string | 否 | "text" / "ocr_with_math"（默认 text） |
 
-1. 优先用 `extract_bibtex` 自动抽
-2. 如果文章是 preprint 没 DOI → 手填 `arxiv_id` 字段
-3. ...
+```json
+{"tool_name": "read_pdf", "tool_args": {"path_or_url": "paper.pdf"}}
 ```
 
-**何时该写 extended.md**：当 summary.md 已经塞不下、但 LLM 又确实需要这些细节时。
+**何时调**：
+- 用户给了 arxiv URL → `read_pdf(url)` 直接读
+- PDF 含大量公式 → 加 `mode="ocr_with_math"`
 
-**何时不写**：
+### extract_bibtex
 
-- 信息太杂 → 拆多个 ACT
-- 信息只有 1-2 条 → 直接加到 summary.md
+从论文文本抽 BibTeX。
+
+| 参数 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| text | string | 是 | 论文全文或 abstract |
+
+**最佳实践**：
+1. preprint 没 DOI → 手填 `arxiv_id` 字段
+```
+
+✅ **SDK 解析器精确识别每个工具**：
+- `### read_pdf` heading → `all_tools["read_pdf"] = {description, parameters, examples}`
+- micro ReACT Phase-2 prompt 看到完整契约
+
+#### 4.6.2 写法 B：markdown 表格风格（工程化场景）
+
+```markdown
+# 📚 科研论文助手 — Phase 编排
+
+## Phase 1：检索 + 读取
+
+| Step | 工具 | 输入参数（精确名） | 输出字段 / 门禁 |
+|---|---|---|---|
+| 1 | `search_arxiv` | `query: str`, `max_results: int=10` | `papers: list[{title, abstract, pdf_url}]` |
+| 2 | `read_pdf` | `path_or_url: str`, `mode: str="text"` | `text`, `pages_count`（`pages_count>0` 否则停） |
+
+## Phase 2：抽取 + 摘要
+
+| Step | 工具 | 输入参数 | 输出字段 / 门禁 |
+|---|---|---|---|
+| 3 | `extract_bibtex` | `text: str` | `bibtex_str`；缺 DOI → 手填 `arxiv_id` |
+| 4 | `summarize_paper` | `text`, `length: int=500` | `summary_str`；length > 800 → 警告 token 上限 |
+```
+
+✅ **SDK 自动识别**：
+- `_parse_extended_table_fallback` 扫表格，从 cell 反引号识别 `search_arxiv` / `read_pdf` / `extract_bibtex` / `summarize_paper`
+- 写入 `all_tools[name] = {parameters: <表头+所在行>}`
+- `_extract_tool_section_from_table` 按工具名返回完整表格段落 + 章节标题
+
+#### 4.6.3 何时该写 extended.md
+
+| 情形 | 该写吗 |
+|---|---|
+| summary.md 已塞不下、LLM 需详细 know-how | ✅ 写 |
+| 信息太杂 | ❌ 拆多个 ACT |
+| 信息只 1-2 条 | ❌ 直接加到 summary.md |
+| 工具只在 `ToolPlugin.get_tools()` 注册了 schema | ⚠️ **不一定要写**——SDK 会自动生成（详 §4.9） |
 
 ### 4.7 ACT hint 反模式
 
@@ -520,6 +747,110 @@ LLM context 是稀缺资源。一个 ACT 的 hint 加起来 > 2K token → 反�
 - 把详细规则拆到 extended.md（按需加载）
 - 把多余规则下沉到工具入口归一化（System 1）
 - 把铁律下沉到 GatePlugin（System 1）
+
+### 4.9 SDK 自动工具文档生成（2026-05-27 PR-1）
+
+**问题**：开发者写 ACT extended.md 时，常常被迫**手写**每个工具的参数表
+（因为担心 LLM 不知道参数名 / 类型）。结果：
+
+- 工具改 schema 后忘了同步文档 → LLM 看到过时签名 → 调用失败
+- 多个 ACT 引用同一工具 → 参数表在多处复制 → DRY 违反
+- 写 30+ 个工具的参数表 → 上手成本爆炸
+
+**SDK 自动兜底**：当你在 `ToolPlugin.get_tools()` 里声明工具 spec 时：
+
+```python
+class MyAnalyticsToolPlugin:
+    plugin_id = "myorg.analytics"
+
+    def get_tools(self):
+        return [{
+            "name": "data_analyst_compute_stats",
+            "description": "对 CSV 数值列做 mean/std/min/max 统计",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "CSV 路径"},
+                    "columns": {"type": "array", "items": {"type": "string"}, "description": "要统计的列名"},
+                },
+                "required": ["path", "columns"],
+            },
+            "handler": _compute_stats_handler,
+        }]
+```
+
+**SDK 自动做的事**（`modules/agent/sdk/auto_tool_doc.py`）：
+
+1. 注册时调 `ACTDocGenerator.generate_tool_doc(spec)` 生成完整 markdown：
+   ```markdown
+   ### data_analyst_compute_stats
+
+   对 CSV 数值列做 mean/std/min/max 统计
+
+   | 参数 | 类型 | 必填 | 说明 |
+   |---|---|---|---|
+   | path | string | 是 | CSV 路径 |
+   | columns | string[] | 是 | 要统计的列名 |
+
+   ```json
+   {"tool_name": "data_analyst_compute_stats", "tool_args": {}}
+   ```
+   ```
+
+2. 缓存到进程级 SSOT `_TOOL_DOC_REGISTRY[tool_name]`
+3. ACTPlugin 加载时注册 `extended_md_supplement_provider`，按需把工具文档拼接注入到对应 ACT 的 `extended.md` 末尾
+4. `_parse_extended` 重新 parse 合并后的内容，`all_tools` 全部可用
+5. micro ReACT Phase-2 prompt 看到所有工具完整契约
+
+**防重复注入**：若你在 ACT extended.md 已手写 `### <tool_name>` heading（说明
+你主动覆盖了 SDK 默认文档），SDK 会跳过该工具的自动注入 —— 避免 prompt 翻倍 +
+DRY 违反。
+
+**Rollback**：env `KROW_SDK_AUTO_TOOL_DOC=false` 关闭自动生成。
+
+**判定准则**：
+
+| 你需要做的事 | 怎么做 |
+|---|---|
+| 让 LLM 知道工具有什么参数 | 仅在 `ToolPlugin.get_tools()` 写 `input_schema` —— SDK 自动生成 |
+| 给 LLM 加跨工具约束（"先 A 再 B"） | 在 ACT extended.md 写 `## Phase 工作流` 章节 |
+| 给某个工具加业务级硬规则 | 在 ACT extended.md 写 `### tool_name`（覆盖 SDK 默认） |
+| 防 LLM 调用错误参数值 | 用 `GatePlugin` System 1 闸住，不要写在 hint 里 |
+
+### 4.10 自检：ACT 是否被正确解析
+
+**典型病症**：写完 ACT 后跑 plan_task，发现 LLM 凭工具名瞎填参数 / 跳步骤 / 顺序错。
+高概率是 ACT 解析失败 → micro ReACT prompt 空空。
+
+**5 分钟自检脚本**：
+
+```python
+# tests/test_my_act_loading.py
+def test_my_act_doc_coverage():
+    """反退化 test：保证 ACT extended.md 被 SDK 正确解析。"""
+    from modules.agent.act.act_hierarchy import get_hierarchy_loader
+
+    loader = get_hierarchy_loader()
+    extended = loader.load_extended("ext_my_act_name")
+
+    assert extended is not None, "ACT 加载失败"
+    # 覆盖率断言：声明的工具数 vs 解析出的工具数
+    declared_tools = ["my_tool_a", "my_tool_b", "my_tool_c"]
+    parsed = set(extended.all_tools.keys())
+    missing = [t for t in declared_tools if t not in parsed]
+    assert not missing, f"工具未解析：{missing}（检查 extended.md 写法）"
+
+    # Phase-2 prompt 完整性断言
+    prompt = loader.load_extended_as_prompt(
+        act_name="ext_my_act_name",
+        tool_filter=declared_tools[:3],
+    )
+    assert len(prompt) > 500, f"prompt 过短 ({len(prompt)}b)，工具文档可能缺失"
+    for t in declared_tools[:3]:
+        assert t in prompt, f"工具 {t} 文档未注入 Phase-2 prompt"
+```
+
+跑 `pytest tests/test_my_act_loading.py -v`，覆盖率 < 80% 立刻发现问题。
 
 ---
 

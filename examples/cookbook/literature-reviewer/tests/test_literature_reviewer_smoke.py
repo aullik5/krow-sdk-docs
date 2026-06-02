@@ -378,6 +378,9 @@ def test_act_plugin_act_root_exists() -> None:
     plugin = lr.LiteratureReviewerACTPlugin()
     assert plugin.get_act_root().is_dir()
     assert (plugin.get_act_root() / "ext_literature_reviewer.md").is_file()
+    assert (plugin.get_act_root() / "__act__.yaml").is_file(), (
+        "ACT manifest 必须是独立 __act__.yaml（loader 不读 .md frontmatter）"
+    )
 
 
 def test_act_plugin_includes_word_smart_export() -> None:
