@@ -1,0 +1,24 @@
+name: literature_reviewer
+display_name: 文献综述员（Literature Reviewer）
+description: |
+  当用户提供 N 篇 paper PDF 且要"综述 / literature review / survey / 主题
+  聚类 / 引用核对 / 论文综述章节"时进入此 ACT。
+  本 ACT 内 Agent 会：
+  - 用 deterministic 工具批量抽 paper 元数据（不让 LLM 读 PDF 全文塞 prompt）
+  - 用 TF-IDF + 凝聚聚类把 paper 按主题分组（不让 LLM 凭感觉分组）
+  - 用引用图 / 抄袭检测 / 章节大纲生成等 System 1 工具支撑
+  - 在合规守门 (CitationCompletenessGate / PlagiarismGate) 监督下产出综述
+when_to_enter:
+  - "用户提到 文献综述 / literature review / survey paper / 综述章节"
+  - "用户提到 主题聚类 / 引用图 / paper 元数据抽取"
+  - "用户上传了多份 paper PDF（≥3）"
+  - "用户提到 学术综述 / 调研 / 摘要多篇"
+  - "用户提到 引用核对 / 抄袭检测 / 学术规范"
+tools:
+  - literature_reviewer_extract_paper_metadata
+  - literature_reviewer_cluster_papers_by_topic
+  - literature_reviewer_build_citation_graph
+  - literature_reviewer_detect_plagiarism_overlap
+  - literature_reviewer_generate_review_outline
+  - word_smart_export
+priority: 10

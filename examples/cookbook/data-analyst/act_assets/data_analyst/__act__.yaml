@@ -1,0 +1,27 @@
+name: data_analyst
+display_name: 数据审计员（Data Auditor）
+description: |
+  当用户上传 CSV / Excel / JSON 数据文件且要"分析 / 统计 / 出报告 / 看洞察 /
+  合规审计 / 异常检测 / 看相关性"时进入此 ACT。
+  本 ACT 内 Agent 会：
+  - 用 deterministic 工具计算统计指标（不让 LLM 凭感觉算数）
+  - 用 IsolationForest / IQR / z-score 做异常检测（Krow 内置无此能力）
+  - 用 pandas 算相关性矩阵（防 LLM 凭感觉判断 column 间相关性）
+  - 在合规守门 (PIIDetectorGate / OutputPathGate) 监督下产出报告
+  - 然后让 LLM 基于真实数据写中文 markdown 报告
+when_to_enter:
+  - "用户提到 数据分析 / 统计 / 报告 / 看 csv / 看 excel / 看 trend / 看分布"
+  - "用户提到 异常检测 / 离群点 / outlier / 数据审计 / 合规审计"
+  - "用户提到 相关性 / correlation / 看变量关系"
+  - "用户上传了 .csv / .xlsx / .json 文件"
+  - "用户要求 出报告 / 写洞察 / 找规律 / 探索数据"
+tools:
+  - data_analyst_read_csv
+  - data_analyst_compute_stats
+  - data_analyst_detect_anomalies
+  - data_analyst_compute_correlation
+  - data_analyst_pick_palette
+  - data_analyst_write_report
+  # PDF 输出复用 Krow 内置 word_smart_export 工具（不在本 plugin 注册）
+  - word_smart_export
+priority: 10
