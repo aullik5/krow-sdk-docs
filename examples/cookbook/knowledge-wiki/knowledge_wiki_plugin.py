@@ -444,6 +444,51 @@ def extract_ontology_from_sources(
     }
 
 
+def _gather_chunk_evidence(
+    store: Any,
+    ctx: dict[str, Any],
+    entities: list[Any],
+    *,
+    max_entities: int = 12,
+    max_chunks: int = 2,
+    excerpt_chars: int = 300,
+) -> str:
+    """为实体反查原文 chunk 摘要，做关系判定的「证据」（P2-C chunk-grounded 深挖）.
+
+    复用引擎内置 ``tool_query_chunks_by_entity``（appears_in 倒排 → DocumentChunk），
+    **不重写** chunk 检索逻辑（SSOT 铁律）。让 LLM 基于原文证据连关系，而非仅凭
+    名称/定义猜测——更深、更准、可溯源，且与桌面 ``ontology.link`` 触发器 P2-C
+    升级（先取证再连关系）保持同源语义。
+
+    受 ``max_entities`` / ``excerpt_chars`` 双重限制，防 prompt 膨胀。
+    """
+    try:
+        from modules.agent.react_templates.extractive_tools import (
+            tool_query_chunks_by_entity,
+        )
+    except Exception:  # noqa: BLE001
+        return ""
+    blocks: list[str] = []
+    for ent in entities[:max_entities]:
+        eid = getattr(ent, "id", "") or ""
+        if not eid:
+            continue
+        try:
+            md = tool_query_chunks_by_entity(
+                {"entity_id": eid, "max": max_chunks, "include_text": True},
+                ctx,
+                store=store,
+            )
+        except Exception:  # noqa: BLE001
+            continue
+        if not md or str(md).startswith("❌"):
+            continue
+        excerpt = str(md).strip()[:excerpt_chars]
+        label = getattr(ent, "label", eid)
+        blocks.append(f"### {eid}（{label}）\n{excerpt}")
+    return "\n\n".join(blocks)
+
+
 def link_ontology_relations(
     project_root: str | Path | None,
     *,
@@ -451,6 +496,10 @@ def link_ontology_relations(
     max_attempts: int = 3,
 ) -> dict[str, Any]:
     """LLM 对已抽本体提领域关系候选 + 落库（System 2，复用 seed 同款 SSOT 模式）.
+
+    P2-C（chunk-grounded 深挖，2026-06-09）：连关系前先用 ``query_chunks_by_entity``
+    反查实体出现的**原文 chunk** 作为证据，让 LLM 据原文判断关系（更深/更准/可溯源），
+    与桌面 ``ontology.link`` 触发器的 P2-C 升级同源。
 
     与抽取同理，thinking 模型偶发 ``<think>`` 截断导致 0 候选 → 最多重试
     ``max_attempts`` 次（System 1 鲁棒包装）。
@@ -499,16 +548,26 @@ def link_ontology_relations(
         + ["", "# Entities"] + [_brief(o) for o in entities]
         + ["", "# Events"] + [_brief(o) for o in events]
     )
+    # P2-C · chunk-grounded：拉回实体原文证据，让 LLM 据原文连关系（非凭名称猜测）。
+    ctx = {"project_root": str(pr), "task_context": {"project_root": str(pr)}}
+    evidence = _gather_chunk_evidence(store, ctx, entities)
     system = (
-        "你是领域本体工程师。基于给定的 Concept/Entity/Event 清单，找出**明确**的"
-        "领域关系。只输出 JSON 数组。每项字段：source_id（必须来自清单），"
+        "你是领域本体工程师。基于给定的 Concept/Entity/Event 清单 + 原文证据，"
+        "找出**明确**的领域关系。**优先依据下方「原文证据」判断**，不要仅凭名称/"
+        "定义臆测；证据缺失或不支持的关系一律不输出（避免产生无依据的红链）。"
+        "只输出 JSON 数组。每项字段：source_id（必须来自清单），"
         "target_id（必须来自清单），kind ∈ is_a/part_of/causes/participates/"
         "precedes/related，weight_label ∈ strong/medium/weak。"
         "避免自环 / 重复 / 模糊联想；不确定就不输出。"
     )
+    evidence_block = (
+        f"\n\n# 原文证据（实体在源文档中的出现片段，关系判定优先据此）\n{evidence}"
+        if evidence else ""
+    )
     user = (
-        f"请基于下列 Ontology 对象清单，给出 {min(max_relations, 20)} 条以内的关系。\n\n"
-        f"---\n{roster}\n---"
+        f"请基于下列 Ontology 对象清单{'与原文证据' if evidence else ''}，"
+        f"给出 {min(max_relations, 20)} 条以内的关系。\n\n"
+        f"---\n{roster}{evidence_block}\n---"
     )
     import re
 

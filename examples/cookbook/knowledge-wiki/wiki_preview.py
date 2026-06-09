@@ -6,7 +6,7 @@
 演示 SDK 开发者拿到 ``.krow/wiki`` 后如何在 Web 端富渲染（Markdown +
 ``[[wiki-link]]`` 站内跳转 + mermaid 关系图 + katex + 代码高亮）。
 
-设计要点（与 docs/zeru/wiki_web_handoff 方案 A 对齐）：
+设计要点（与 web-handoff/ 方案 A 对齐）：
 - **不重写渲染器**：直接拷贝 ``wiki-render.js`` + ``wiki-theme.css`` 到预览目录，
   浏览器侧 ``createWikiRenderer`` 渲染（SSOT 铁律：渲染逻辑只有一份）。
 - **零依赖可离线骨架**：页面数据以 JSON 内联，markdown-it / mermaid / katex /

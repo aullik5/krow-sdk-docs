@@ -81,8 +81,8 @@ open output/wiki_preview/index.html      # macOS（Windows: start ...；Linux: x
 - 渲染逻辑与桌面 WikiView **同源**（`ui/static/wiki/`），不重写轮子
 
 **接入生产前端**：本 demo 把页面数据内联进 HTML（适合本地走查）；上 Web/Cloud 时
-按 `docs/zeru/wiki_web_handoff/` 三件套接 BFF（`GET /api/wiki/page` 等）+ Web shell +
-`@krow/wiki-render`。详见该目录 README。
+按 [`web-handoff/`](./web-handoff/README.md) 三件套接 BFF（`GET /api/wiki/page` 等）+
+Web shell + `@krow/wiki-render`（方案 A 渲染套件 + 方案 B 前端架构 + 方案 C BFF API 规范）。
 
 ## SDK plugin 清单（按需省略 Hint / Observability）
 

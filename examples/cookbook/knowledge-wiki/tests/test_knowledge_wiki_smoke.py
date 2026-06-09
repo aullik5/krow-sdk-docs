@@ -226,6 +226,27 @@ def test_link_relations_no_project_root_fail_loud() -> None:
     assert "ok" in res
 
 
+# ── P2-C · chunk-grounded 证据采集（_gather_chunk_evidence）──
+
+
+def test_link_evidence_empty_entities_returns_empty() -> None:
+    """无实体 → 空证据串（不抛错）."""
+    assert kw._gather_chunk_evidence(object(), {}, []) == ""
+
+
+def test_link_evidence_graceful_and_bounded() -> None:
+    """smoke 环境引擎工具不可用 / 实体超额 → 优雅降级为 str，受 max_entities 限制."""
+    class _E:
+        def __init__(self, i: int) -> None:
+            self.id = f"ent-{i}"
+            self.label = f"实体{i}"
+
+    out = kw._gather_chunk_evidence(
+        object(), {}, [_E(i) for i in range(50)], max_entities=12
+    )
+    assert isinstance(out, str)
+
+
 # ════════════════════════════════════════════════════════════════════════
 # §3. ToolPlugin Protocol
 # ════════════════════════════════════════════════════════════════════════
