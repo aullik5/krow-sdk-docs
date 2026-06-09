@@ -395,6 +395,83 @@ def test_listener_counts_cookbook_tool_names() -> None:
     assert listener._phase_counts == {"extract": 1, "relate": 1, "publish": 1}
 
 
+# ════════════════════════════════════════════════════════════════════════
+# §7. render_wiki_preview（前端预览 · 零 LLM · 端到端 handoff）
+# ════════════════════════════════════════════════════════════════════════
+
+
+def _seed_wiki(project_dir: Path) -> None:
+    wiki = project_dir / ".krow" / "wiki" / "concepts"
+    wiki.mkdir(parents=True, exist_ok=True)
+    (wiki / "solar-pv.md").write_text(
+        "---\ntitle: 太阳能光伏\ntype: concept\ntier: stub\n"
+        "sources:\n  - 01.md\nconfidence: high\n---\n"
+        "## 定义\n光伏效应把光能转换为电能。\n\n"
+        "## 关联\n- `is_a` -> [[concepts/renewable|可再生能源]]\n",
+        encoding="utf-8",
+    )
+    (wiki / "renewable.md").write_text(
+        "---\ntitle: 可再生能源\ntype: concept\ntier: essay\n"
+        "sources: [02.md]\n---\n## 定义\n可再生能源自然补充。\n",
+        encoding="utf-8",
+    )
+
+
+def test_preview_missing_wiki_dir_fail_loud(tmp_path: Path) -> None:
+    from wiki_preview import render_wiki_preview
+    res = render_wiki_preview(tmp_path, tmp_path / "output")
+    assert res["ok"] is False
+    assert res["page_count"] == 0
+
+
+def test_preview_renders_index_html(tmp_path: Path) -> None:
+    from wiki_preview import render_wiki_preview
+    _seed_wiki(tmp_path)
+    res = render_wiki_preview(tmp_path, tmp_path / "output")
+    assert res["ok"] is True
+    assert res["page_count"] == 2
+    assert res["essay_count"] == 1
+    assert res["stub_count"] == 1
+    index = tmp_path / "output" / "wiki_preview" / "index.html"
+    assert index.exists()
+    html = index.read_text(encoding="utf-8")
+    # 词条标题 + tier badge + 数据内联 + 渲染器引用
+    assert "太阳能光伏" in html
+    assert "可再生能源" in html
+    assert "tier-essay" in html and "tier-stub" in html
+    assert 'id="wiki-data"' in html
+    assert "wiki-render.js" in html
+
+
+def test_preview_copies_renderer_assets(tmp_path: Path) -> None:
+    from wiki_preview import render_wiki_preview
+    _seed_wiki(tmp_path)
+    render_wiki_preview(tmp_path, tmp_path / "output")
+    pv = tmp_path / "output" / "wiki_preview"
+    # 官方渲染器资产被拷贝（SSOT 复用，不重写）
+    assert (pv / "wiki-render.js").exists()
+    assert (pv / "wiki-theme.css").exists()
+
+
+def test_preview_frontmatter_parse_and_skip_tombstone(tmp_path: Path) -> None:
+    from wiki_preview import _split_frontmatter, render_wiki_preview
+    fm, body = _split_frontmatter(
+        "---\ntitle: X\nsources:\n  - a.md\n  - b.md\n---\nhello\n"
+    )
+    assert fm["title"] == "X"
+    assert fm["sources"] == ["a.md", "b.md"]
+    assert body.strip() == "hello"
+    # 软删除墓碑页被跳过
+    _seed_wiki(tmp_path)
+    dele = tmp_path / ".krow" / "wiki" / "concepts" / "dead.md"
+    dele.write_text(
+        "---\ntitle: 墓碑\ntype: concept\ndeleted: true\n---\n空\n",
+        encoding="utf-8",
+    )
+    res = render_wiki_preview(tmp_path, tmp_path / "output")
+    assert res["page_count"] == 2  # 墓碑不计入
+
+
 def test_listener_ignores_unrelated_tools() -> None:
     listener = kw.CompileProgressListener(verbose=False)
     listener._on_tool_done(_Ev({"tool_name": "some_other_tool"}))

@@ -40,11 +40,17 @@
 - 关键实体之间补领域 specific 关系：`causes` / `part_of` / `uses` / `depends_on`
 - 失败时（schema 拒绝）用 `summarize_ontology` 看 advice 改用合法 kind
 
-### 3. **发布阶段（publish）** — `wiki_info(get_template)` + `smart_file_write`
+### 3. **发布阶段（publish）** — `knowledge_wiki_materialize`（stub）+ `smart_file_write`（essay）
 
-- 对核心概念 / 实体**逐个**建页：先 `wiki_info(operation="get_template")` 拿模板
-- `smart_file_write` 写 `.krow/wiki/{concepts|entities|comparisons}/名称.md`
-- frontmatter 必填 `title/tags/sources/status/type`；status 仅 `{draft,reviewed,mature,archived}`
+两档词条模型（架构公理 D）：
+
+- 🔴 **stub 红链**：调一次 `knowledge_wiki_materialize` 把本体所有达标节点**零-LLM
+  确定性物化**为 stub 词条（定义 + 关系导航 + 出处）。**不要**逐个 concept 去
+  `smart_file_write` 手写 stub —— 那是工具的活，手写只会撞 `wiki_gate`。
+- 🔵 **essay 蓝链**：对 **top-K 重要节点**用 `smart_file_write` 写 `tier: essay`
+  精写页 `.krow/wiki/{concepts|entities|comparisons}/名称.md`
+- essay frontmatter 必填 `title/tags/sources/status/type/tier`；status 仅
+  `{draft,reviewed,mature,archived}`；正文是人话论述（**不是** JSON 转储）
 - 必含 H2 骨架（concept 页：`## 定义 / ## 重要属性 / ## 关联 / ## 参考`）
 - wiki-link 用相对路径 + 语义标注：`[[concepts/foo.md|rel:depends_on]]`
 
@@ -66,7 +72,7 @@
 
 | Gate | 守的什么 | 触发后 LLM 应该怎么做 |
 |---|---|---|
-| `WikiCoverageGate` | 本体有核心节点但 wiki 页 < 阈值（假编译） | 看 reason → 用 get_template 对核心节点逐个建页 → 重调 coverage_report |
+| `WikiCoverageGate` | 本体有核心节点但 wiki 页 < 阈值（假编译） | 看 reason → 先 `knowledge_wiki_materialize` 物化 stub → 对 top-K 写 essay → 重调 coverage_report |
 
 **为什么不能用 hint 替代**：真实用户反馈"编译完没感觉词条变丰富"，根因正是
 本体抽完但词条几乎没写。hint 提醒 LLM "记得写 wiki" 在压缩任务时会被跳过；

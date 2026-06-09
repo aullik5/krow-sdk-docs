@@ -98,14 +98,29 @@ krow-sdk-install --api-key $KROW_API_KEY
 ### 2.1 升级到最新 runtime
 
 ```bash
-krow-sdk-install --api-key $KROW_API_KEY --upgrade
+krow-sdk-install --api-key $KROW_API_KEY --upgrade   # 或 -U
+```
+
+`--upgrade` 会向 `pip install` 传 `--upgrade`，确保已装旧版本时强制升级（修复"pip 报
+already satisfied 拒绝升级"的体验问题）。CLI 选 wheel 时**总是**在当前 host 兼容的所有
+版本里按 PEP 440 选**最新**（不再受 index HTML 顺序影响）。
+
+本地安装损坏 / 想强制重装同版本时加 `--force-reinstall`（隐含 `--upgrade` 行为）：
+
+```bash
+krow-sdk-install --api-key $KROW_API_KEY --force-reinstall
 ```
 
 ### 2.2 安装指定版本
 
 ```bash
-krow-sdk-install --api-key $KROW_API_KEY --version 0.8.12  # 与 krow-agent-sdk 同名版本号
+krow-sdk-install --api-key $KROW_API_KEY --version 0.8.12.60   # 精确版本
+krow-sdk-install --api-key $KROW_API_KEY --version 0.8.12      # 段前缀：命中 0.8.12.* 里最新
 ```
+
+`--version` 支持**精确**或**段前缀**匹配（按 `.` 分段）：`0.8.12` 命中 `0.8.12.60`，但
+`0.8.1` **不会**误命中 `0.8.12.*`（段比对 `1` ≠ `12`）。指定版本在当前 host 兼容范围内
+不存在时 fail-loud（列出可用版本清单）。
 
 ### 2.2.1 自定义 Cloud endpoint（staging / 私有部署）
 
@@ -175,6 +190,61 @@ finally:
 > API SSOT：`AgentBuilder` 链式 API 完整签名见 `modules/agent/sdk/builder.py`；
 > `AgentV3Result` 字段（`success` / `report` / `error` / `final_output` property）见
 > `modules/agent/agent_v3.py`。
+
+---
+
+## 3.5 Aux model 注册（provider-registration）
+
+除 chat / reasoning 外，agent 还会用到 4 个**辅助（aux）能力**：
+
+| aux 类别 | 用途 | 真实运行时消费者（SSOT） |
+| --- | --- | --- |
+| `vision` | 视觉质检 / 截图理解（PPT、网页 grounding） | `modules/agent/visual/grounding_service.py` |
+| `image_gen` | 文生图 | `modules/ai/krow/image.py::resolve_default_image_gen_model` |
+| `image_edit` | 图像编辑 | `modules/ai/krow/image.py::resolve_default_image_edit_model` |
+| `text_encoder` | 文本向量化（知识库 / 检索） | `modules/ai/krow/embedding.py` |
+
+**关键事实**：aux 4 类的真实消费者各有独立的模型解析器，**不**走
+`AIProviderManager` 的 category 注册表。因此 headless 场景**无需**为 aux 单独注册
+provider，只要把模型 id 喂给对应解析器即可。三种等价注入方式（优先级高→低）：
+
+**① SDK builder（推荐，指定即采用）**
+
+```python
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(os.environ["KROW_API_KEY"])
+    .with_project_root(workspace)
+    .with_vision_model("qwen2.5-vl-72b-instruct")   # 桥接到 grounding_service
+    .with_image_gen_model("seedream-4.0")            # 桥接到 image 解析器
+    .with_text_encoder_model("bge-m3")               # 桥接到 embedding 解析器
+    .build()
+)
+```
+
+`build()` 会把每个 `.with_<aux>_model()` 桥接到对应消费者的进程级 override
+（最高优先级）。即使底层 `AIProviderManager` 为空（headless 常态）也能生效——
+不再像旧版本（≤ 0.8.x）那样抛 `ExplicitAuxModelNotApplicableError`。
+
+**② 环境变量（pod-manager / 不改代码场景，与 ① 等价）**
+
+```bash
+export KROW_VISION_MODEL=qwen2.5-vl-72b-instruct
+export KROW_IMAGE_GEN_MODEL=seedream-4.0
+export KROW_IMAGE_EDIT_MODEL=seededit-3.0
+export KROW_TEXT_ENCODER_MODEL=bge-m3
+```
+
+**③ 自带完整 `AIProviderManager`（桌面 IDE 路径消费者，如 context_enhancer 读 vision provider）**
+
+```python
+AgentBuilder().with_ai_manager(my_ai_manager).build()
+```
+
+> **`KROW_AI_CONFIG_OVERLAY_PATH` 的边界**：该 env 仅被 headless server 主程序
+> （`app/headless_main.py::_apply_ai_overlay`）消费，用于覆盖 `ai.providers[category]`，
+> **不**被 `AgentBuilder.build()` SDK 路径读取。SDK 嵌入式接入请用上面 ①/② 注入 aux
+> 模型，不要依赖 overlay。
 
 ---
 

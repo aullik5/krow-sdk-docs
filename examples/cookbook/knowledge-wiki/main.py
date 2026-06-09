@@ -17,9 +17,10 @@
 
 输出：
     <project-dir>/.krow/ontology/global.db   (本体 SSOT：概念/实体/关系/chunk)
-    <project-dir>/.krow/wiki/**/*.md         (百科词条：每个核心节点一篇)
+    <project-dir>/.krow/wiki/**/*.md         (百科词条：stub 红链 + essay 蓝链)
     output/compile_report.md                 (编译验收报告：覆盖率 + 词条清单)
     output/ontology_snapshot.json            (本体计数快照)
+    output/wiki_preview/index.html           (前端预览：双击即看的富渲染百科站点)
     output/<basename>.progress.jsonl         (可选：三阶段编译进度日志)
 
 ────────────────────────────────────────────────────────────────────
@@ -31,13 +32,24 @@
     0. 规划：knowledge_wiki_scan_sources    （System 1 · 零 LLM）
     1. 抽取：knowledge_wiki_extract_ontology （System 2 · 每文件一次 LLM 调用）
     2. 关联：knowledge_wiki_link_relations   （System 2 · 一次 LLM 调用提关系）
-    3. 物化：knowledge_wiki_materialize      （System 1 · 零 LLM · 红链物化）
+    3. 物化：knowledge_wiki_materialize      （System 1 · 零 LLM · stub 红链物化）
     4. 验收：knowledge_wiki_coverage_report  （System 1 · 零 LLM · 覆盖核对）
+    5. 预览：render_wiki_preview             （System 1 · 零 LLM · 前端富渲染 handoff）
 
 抽取 / 物化都复用引擎内置实现（``extractive_tools`` / ``ontology_stub_compiler``），
-cookbook **不重写**这些轮子（SSOT 铁律）。SDK 场景关键点：桌面端 wiki 物化由
-``KnowledgeLifecycleManager`` 自动触发，SDK 端**必须显式调 materialize**，否则
-本体抽完但 wiki 不丰富（正是真实用户反馈的痛点）。
+前端渲染复用官方包 ``packages/wiki-render``（``@krow/wiki-render``，与桌面 WikiView
+同源），cookbook **不重写**这些轮子（SSOT 铁律）。
+
+两档词条模型（架构公理 D）：
+- **stub 红链**：本体里每个达标节点零-LLM 派生为轻量词条（定义 + 关系导航 +
+  出处），由 materialize 步骤（或 agent.run 路径里的 System-1 自动 hook）确定性产出。
+- **essay 蓝链**：top-K 重要节点的精写论述页（tier: essay）——若走 ``agent.run``
+  macro-ReACT 编译，由 LLM 在 publish 阶段写；本确定性 demo 聚焦 stub 物化 + 前端。
+
+SDK 场景关键点（2026-06-08 修复后）：``agent.run(task_context={"strategy":
+"knowledge_compile"})`` 路径现已内置 System-1 stub 自动物化（对齐桌面
+``KnowledgeLifecycleManager``）；本确定性 demo 仍显式调 materialize 以保证可靠
+可复现的产出（两条路径产出等价的 stub 词条）。
 
 演示 SDK plugin（按需省略 Hint / Observability，详 design §3）：
 - ToolPlugin（scan / extract / relate / materialize / coverage 五件套）
@@ -65,6 +77,7 @@ from knowledge_wiki_plugin import (
     report_wiki_coverage,
     scan_knowledge_sources,
 )
+from wiki_preview import render_wiki_preview
 from krow_agent_sdk import AgentBuilder, BudgetSpec
 
 _HERE = Path(__file__).resolve().parent
@@ -125,6 +138,11 @@ def main(argv: list[str] | None = None) -> int:
         "--skip-relations",
         action="store_true",
         help="跳过关系推断阶段（只抽本体 + 物化 wiki，更快）",
+    )
+    parser.add_argument(
+        "--skip-preview",
+        action="store_true",
+        help="跳过前端预览生成（不产出 output/wiki_preview/index.html）",
     )
     # 预算
     parser.add_argument("--budget-llm-calls", type=int, default=None)
@@ -292,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         mat = materialize_wiki_pages(project_dir, min_signal=args.min_signal)
         print(f"   📝 {mat.get('summary')}")
 
-        print("\n【4/4】验收阶段：本体↔wiki 覆盖核对")
+        print("\n【4/5】验收阶段：本体↔wiki 覆盖核对")
         coverage = report_wiki_coverage(project_dir)
         print(f"   ✅ {coverage.get('summary')}")
 
@@ -300,6 +318,12 @@ def main(argv: list[str] | None = None) -> int:
             report_path, coverage, doc_files=doc_files, project_dir=project_dir
         )
         _write_snapshot(snapshot_path, coverage)
+
+        preview: dict = {}
+        if not args.skip_preview:
+            print("\n【5/5】预览阶段：渲染前端富百科站点（零 LLM · @krow/wiki-render）")
+            preview = render_wiki_preview(project_dir, output_dir)
+            print(f"   🌐 {preview.get('summary')}")
 
         wiki_pages = coverage.get("wiki_page_count", 0) if coverage.get("ok") else 0
         artifact_ok = wiki_pages >= 1 and coverage.get("key_node_count", 0) >= 1
@@ -320,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n📝 编译报告：{report_path}")
         print(f"📊 本体快照：{snapshot_path}")
         print(f"📖 wiki 词条：{project_dir / '.krow' / 'wiki'}（{wiki_pages} 篇）")
+        if preview.get("ok"):
+            print(f"🌐 前端预览：{preview.get('index_html')}（双击用浏览器打开）")
         if progress_log_path and progress_log_path.exists():
             n = sum(1 for _ in progress_log_path.open("r", encoding="utf-8"))
             print(f"📋 进度日志：{progress_log_path}（{n} 条）")

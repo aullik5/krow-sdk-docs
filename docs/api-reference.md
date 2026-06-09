@@ -581,7 +581,11 @@ def run(
 | `project_id` | 项目 ID；与 KrowService 跨进程协作时使用 |
 | `stop_event` | `threading.Event` 实例；外部 `set()` 后 agent 协作停止（不立即；详 `agent_v3.py` stop_event 协议） |
 | `inbound_messages` | 上文消息序列 `[{"role": "user", "content": ...}]`（兼容 OpenAI chat 格式） |
-| `task_context` | 任务级配置（如 ACT 强制选择、tool whitelist） |
+| `task_context` | 任务级配置（如 ACT 强制选择、tool whitelist、`micro_budget`、`max_coverage_rounds`） |
+
+> **`task_context['max_coverage_rounds']`**（int，0-10，默认 2）：长文报告"覆盖度驱动续写"的最大轮数。
+> 当结构化多章节报告（≥3000 字 + ≥3 标题）字符达标但 LLM 自检判定仍有用户子问题未覆盖时，系统会定向补全缺失章节，最多续写本轮数。
+> IM 轻问答场景可设 `0` 关闭（避免任何额外续写延迟）；长报告场景可调高。全局开关：环境变量 `KROW_COVERAGE_CONTINUATION=0` 一键关闭。
 
 #### 返回值：`AgentV3Result`（来自主仓 `modules.agent.agent_v3`）
 

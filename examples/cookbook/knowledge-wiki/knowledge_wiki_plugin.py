@@ -833,14 +833,16 @@ class WikiCoverageGate:
                             f"（概念+实体），但只写了 {wiki_pages} 篇 wiki 页"
                             f"（要求 ≥{min_pages}）\n"
                             "   位置：knowledge_wiki_coverage_report 输出 under_populated\n"
-                            "   修法：\n"
-                            "     1. 用 wiki_info(get_template) 拿模板，对核心概念 / 实体"
-                            "逐个 smart_file_write 写 .krow/wiki/ 词条\n"
-                            "     2. 每篇词条含 YAML frontmatter（title/aliases/tags）"
-                            "+ 正文 + wiki-link 互链\n"
+                            "   修法（两档词条模型 · 架构公理 D）：\n"
+                            "     1. stub 红链词条由 knowledge_wiki_materialize（零 LLM）"
+                            "自动物化——若还没调，先调它把本体节点确定性派生为词条\n"
+                            "     2. 对 top-K 重要节点用 smart_file_write 写 tier: essay "
+                            "精写页（人话论述，不是 JSON 转储；frontmatter 含 "
+                            "title/type/tags/sources/status/tier）\n"
                             "     3. 写完重调 knowledge_wiki_coverage_report 复核\n"
-                            "   规范依据：知识库的价值在于可浏览的词条网络，"
-                            "只抽本体不写词条 = 假编译（用户感知不到词条丰富）"
+                            "   规范依据：知识库的价值在于可浏览的词条网络；"
+                            "stub 由系统物化，essay 由你精写——**不要**为覆盖每个节点"
+                            "而批量手写 stub（撞 wiki_gate 空转）"
                         ),
                         gate_name="wiki_coverage",
                     )
