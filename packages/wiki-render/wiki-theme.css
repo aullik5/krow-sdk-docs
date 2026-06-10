@@ -1,0 +1,238 @@
+/* WikiView 亮色主题 — P5c 实现
+ *
+ * v0.8.13.8 P1 · UX Fix · 百科 light SSOT
+ * --------------------------------------
+ * 新增 --bg-elevated / --bg-tertiary / --text-muted / --border-default /
+ * --accent-primary 变量，让 wiki_view.py 的 _build_card_css 不再依赖全局
+ * 暗色 Tokens（design_system.py）。所有 dashboard / inline message /
+ * search result 等 inline 注入的 <style> 都通过 var(--*) 取值，由本
+ * :root 统一接管 → 真正的单点 SSOT。
+ *
+ * 命名约定：保留 --bg-primary / --bg-secondary 等短名（已被组件使用），
+ * 新增 -default / -muted / -elevated / -tertiary 后缀别名，保持与
+ * design_system.py 的 Tokens 命名空间形似但语义独立（亮色 vs 暗色）。
+ */
+:root {
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F8F9FA;
+  --bg-tertiary: #F1F3F5;
+  --bg-elevated: #FFFFFF;
+  --text-primary: #1A1A2E;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --accent: #2563EB;
+  --accent-primary: #2563EB;
+  --accent-light: #EFF6FF;
+  --border: #E5E7EB;
+  --border-default: #E5E7EB;
+  --code-bg: #F3F4F6;
+  --success: #10B981;
+  --warning: #F59E0B;
+  --error: #EF4444;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  padding: 12px 16px;
+  margin: 0;
+  max-width: 860px;
+}
+
+h1, h2, h3, h4 {
+  color: var(--text-primary);
+  margin: 1.5em 0 0.5em;
+  line-height: 1.3;
+}
+h1 { font-size: 1.8em; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+h2 { font-size: 1.4em; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+h3 { font-size: 1.15em; }
+
+p { margin: 0.6em 0; }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code {
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 0.9em;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+}
+
+blockquote {
+  border-left: 4px solid var(--accent);
+  margin: 1em 0;
+  padding: 8px 16px;
+  background: var(--accent-light);
+  color: var(--text-secondary);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+}
+th { background: var(--bg-secondary); font-weight: 600; }
+
+ul, ol { padding-left: 1.5em; margin: 0.5em 0; }
+li { margin: 0.3em 0; }
+
+hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+
+img { max-width: 100%; border-radius: 8px; margin: 1em 0; }
+
+/* Info bar */
+.info-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+.source-link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent);
+  cursor: pointer;
+}
+.source-link:hover {
+  opacity: 0.8;
+}
+
+/* Related Pages */
+.related-pages {
+  margin: 16px 0 24px;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.related-section { margin-bottom: 8px; }
+.related-section:last-child { margin-bottom: 0; }
+.related-section strong { font-size: 12px; color: var(--text-secondary); }
+.related-section ul { margin: 4px 0 0 16px; padding: 0; }
+.related-section li { margin: 2px 0; }
+
+/* Callout / Admonition (GitHub 风格) */
+.callout {
+  border-left: 4px solid var(--accent);
+  border-radius: 4px;
+  padding: 12px 16px;
+  margin: 1em 0;
+  background: var(--accent-light);
+}
+.callout-NOTE { border-left-color: var(--accent); background: #EFF6FF; }
+.callout-TIP { border-left-color: var(--success); background: #ECFDF5; }
+.callout-WARNING { border-left-color: var(--warning); background: #FFFBEB; }
+.callout-IMPORTANT { border-left-color: #8B5CF6; background: #F5F3FF; }
+.callout-CAUTION { border-left-color: var(--error); background: #FEF2F2; }
+.callout-title {
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+/* Rich content: ECharts */
+.echarts-container {
+  width: 100%;
+  max-width: 640px;
+  height: 400px;
+  margin: 1.5em auto;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+.echarts-error {
+  padding: 12px;
+  background: #FEF2F2;
+  color: var(--error);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+/* Rich content: Images */
+.wiki-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  margin: 1em auto;
+  display: block;
+}
+
+/* Rich content: Tables */
+.wiki-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.wiki-content th {
+  background: #f8f9fa;
+  font-weight: 600;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 2px solid #e5e7eb;
+}
+.wiki-content td {
+  padding: 8px 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.wiki-content tr:nth-child(even) td {
+  background: #fafbfc;
+}
+.wiki-content tr:hover td {
+  background: #f0f4ff;
+}
+
+/* Rich content: Mermaid */
+.mermaid {
+  margin: 1.5em auto;
+  text-align: center;
+}
+
+/* 骨架屏（loadFinished 前） */
+.skeleton-pulse {
+  background: linear-gradient(90deg, #F3F4F6 25%, #E5E7EB 50%, #F3F4F6 75%);
+  background-size: 200% 100%;
+  animation: pulse 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+@keyframes pulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@krow/wiki-render",
+  "version": "0.1.0",
+  "description": "Krow Wiki 内容区渲染套件：与桌面 Lite 版 WikiView 视觉一致的 Markdown→HTML 渲染引擎 + 主题（框架无关）。",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "sideEffects": ["*.css"],
+  "main": "./dist/wiki-render.cjs",
+  "module": "./wiki-render.js",
+  "types": "./wiki-render.d.ts",
+  "exports": {
+    ".": {
+      "types": "./wiki-render.d.ts",
+      "import": "./wiki-render.js",
+      "require": "./dist/wiki-render.cjs"
+    },
+    "./theme.css": "./wiki-theme.css",
+    "./wiki-theme.css": "./wiki-theme.css"
+  },
+  "files": ["wiki-render.js", "wiki-render.d.ts", "wiki-theme.css", "dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "node build.mjs",
+    "demo": "python -m http.server 8000",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": { "markdown-it": ">=13.0.0" },
+  "peerDependenciesMeta": { "markdown-it": { "optional": false } },
+  "devDependencies": { "esbuild": "^0.23.0" },
+  "keywords": ["krow", "wiki", "markdown", "renderer"]
+}

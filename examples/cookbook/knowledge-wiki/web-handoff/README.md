@@ -40,11 +40,16 @@
 
 → 前端 `import` 即用，词条渲染**天然与桌面视觉一致**。
 
-> 📦 **获取方式**：渲染套件目前作为 Krow 官方共享包提供。本 cookbook 同目录的
-> [`../wiki_preview.py`](../wiki_preview.py)（零 LLM）演示了如何用同源渲染逻辑把
-> `.krow/wiki/**/*.md` 生成一个可离线打开的静态站点 `output/wiki_preview/index.html`——
-> 这是方案 A 在本地最直接的参考实现，可先用它验证视觉效果。需要把 `@krow/wiki-render`
-> 集成进你自己的前端工程时，联系 `support@krow.cn` 获取分发渠道。
+> 📦 **获取方式**（MIT 许可，自助获取，按优先级任选其一）：
+> 1. **本文档仓**：[`packages/wiki-render/`](../../../../packages/wiki-render/) 目录直接
+>    vendor 进你的前端工程（`wiki-render.js` + `wiki-render.d.ts` + `wiki-theme.css`）；
+> 2. **SDK wheel 随包资产**：`pip install krow-agent-sdk` 后，
+>    `python -c "from krow_agent_sdk.assets import get_wiki_render_dir; print(get_wiki_render_dir())"`
+>    打印资产目录，复制即用。
+> 本 cookbook 同目录的 [`../wiki_preview.py`](../wiki_preview.py)（零 LLM）演示了如何用
+> 同源渲染逻辑把 `.krow/wiki/**/*.md` 生成一个可离线打开的静态站点
+> `output/wiki_preview/index.html`——这是方案 A 在本地最直接的参考实现，可先用它验证视觉
+> 效果（它会自动按 monorepo → SDK wheel → `KROW_WIKI_RENDER_DIR` 环境变量定位渲染资产）。
 
 ### 方案 B — 前端信息架构与交互契约规范
 
@@ -130,7 +135,7 @@ web-handoff/                          # 本目录：生产 Web Handoff 交接文
 └── 02-bff-api-spec.md                # 方案 C：Wiki BFF REST API 规范（含序列图）
 
 ../wiki_preview.py                    # 方案 A 的本地参考实现（零 LLM 静态站点）
-@krow/wiki-render                     # 方案 A：官方框架无关渲染套件（联系 support@krow.cn 获取）
+packages/wiki-render/                 # 方案 A：官方框架无关渲染套件（MIT · 本仓直接 vendor）
 ```
 
 ## 6. 关键参考

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Krow Wiki 渲染套件 · Demo</title>
+  <link rel="stylesheet" href="./wiki-theme.css">
+  <!-- markdown-it（必需）：用 CDN 直接跑 demo；生产请走 npm i markdown-it -->
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js"></script>
+  <!-- 以下为可选富内容库（缺失时优雅降级）：取消注释即可启用 -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script> -->
+  <!-- <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.css"> -->
+  <!-- <script src="https://cdn.jsdelivr.net/npm/katex@0.16/dist/katex.min.js"></script> -->
+</head>
+<body>
+  <!-- 渲染容器 id 必须为 wiki-content（TOC 提取依赖此 id） -->
+  <div id="wiki-content"></div>
+
+  <script type="module">
+    import { createWikiRenderer, parseWikiHref } from './wiki-render.js';
+
+    // markdown-it 经 CDN 挂在 window.markdownit
+    const renderer = createWikiRenderer({ MarkdownIt: window.markdownit });
+
+    const frontmatter = {
+      title: '太阳能光伏发电原理',
+      type: 'concept',
+      sources: ['01_solar_pv_principles.md'],
+      confidence: 'high',
+    };
+
+    const markdown = `
+# 太阳能光伏发电原理
+
+光伏效应是指 [[concepts/semiconductor|rel:depends_on]] 在光照下产生电动势的现象。
+
+> [!NOTE]
+> 本词条由 Krow 知识编译器自动整理，引用见信息栏。
+
+## 关键组件
+
+| 组件 | 作用 |
+| --- | --- |
+| 硅片 | 吸收光子产生电子-空穴对 |
+| PN 结 | 形成内建电场分离载流子 |
+
+相关实体：[[entities/some-vendor]]。事实来源 [来源: 01_solar_pv_principles.md]。
+
+\`\`\`mermaid
+flowchart LR
+  光子 --> 硅片 --> PN结 --> 电流
+\`\`\`
+`;
+
+    const headings = renderer.renderPage(
+      document.getElementById('wiki-content'), markdown, frontmatter
+    );
+    console.log('TOC headings:', headings);
+
+    // 宿主拦截 wiki 自定义 scheme 链接
+    document.getElementById('wiki-content').addEventListener('click', (e) => {
+      const a = e.target.closest('a');
+      if (!a) return;
+      const parsed = parseWikiHref(a.getAttribute('href'));
+      if (parsed) {
+        e.preventDefault();
+        alert(`scheme=${parsed.scheme}\ntarget=${parsed.target}\n（生产环境在此做路由跳转 / 红链建页）`);
+      }
+    });
+  </script>
+</body>
+</html>

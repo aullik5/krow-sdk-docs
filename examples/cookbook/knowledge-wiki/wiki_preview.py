@@ -20,13 +20,42 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 
-# packages/wiki-render 相对本文件的位置：
-#   packages/krow-agent-sdk/examples/cookbook/knowledge-wiki/wiki_preview.py
-#   packages/wiki-render/
 _HERE = Path(__file__).resolve().parent
-_WIKI_RENDER_PKG = (
-    _HERE.parents[3] / "wiki-render"  # …/packages/wiki-render
-)
+
+
+def _resolve_wiki_render_pkg() -> Path:
+    """三级定位 wiki-render 渲染资产目录（确定性，按优先级取第一个命中）。
+
+    1. ``KROW_WIKI_RENDER_DIR`` 环境变量 — 开发者显式覆盖（vendor 自取的文件）
+    2. monorepo 布局 — ``packages/wiki-render/``（本仓内跑 cookbook）
+    3. SDK wheel 资产 — ``krow_agent_sdk/assets/wiki_render/``
+       （外部开发者 ``pip install krow-agent-sdk`` 后的随包镜像，MIT 许可）
+
+    全部未命中返回 monorepo 候选路径（调用方对缺失文件已有内联兜底样式降级）。
+    """
+    import os
+
+    env_dir = os.environ.get("KROW_WIKI_RENDER_DIR", "").strip()
+    if env_dir and Path(env_dir).is_dir():
+        return Path(env_dir)
+
+    monorepo = _HERE.parents[3] / "wiki-render"  # …/packages/wiki-render
+    if (monorepo / "wiki-render.js").exists():
+        return monorepo
+
+    try:
+        from krow_agent_sdk.assets import get_wiki_render_dir
+
+        wheel_dir = get_wiki_render_dir()
+        if (wheel_dir / "wiki-render.js").exists():
+            return wheel_dir
+    except ImportError:
+        pass
+
+    return monorepo
+
+
+_WIKI_RENDER_PKG = _resolve_wiki_render_pkg()
 
 _CATEGORY_LABEL = {
     "concepts": "概念",
