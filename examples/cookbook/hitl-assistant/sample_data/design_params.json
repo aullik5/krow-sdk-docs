@@ -1,0 +1,31 @@
+{
+  "model_name": "centrifugal_pump_v3",
+  "params": {
+    "pump_outlet_diameter_mm": {
+      "value": 50,
+      "unit": "mm",
+      "description": "泵出口直径"
+    },
+    "impeller_blade_count": {
+      "value": 6,
+      "unit": "",
+      "description": "叶轮叶片数"
+    },
+    "shaft_safety_factor": {
+      "value": 1.5,
+      "unit": "",
+      "description": "轴安全系数"
+    },
+    "casing_wall_thickness_mm": {
+      "value": 8,
+      "unit": "mm",
+      "description": "泵壳壁厚"
+    },
+    "rated_speed_rpm": {
+      "value": 2900,
+      "unit": "rpm",
+      "description": "额定转速"
+    }
+  },
+  "change_log": []
+}

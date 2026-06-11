@@ -1157,7 +1157,35 @@ from krow_agent_sdk import (
 | `.with_budget(BudgetSpec(...))` | 自定义预算 |
 | `.with_http_gateway(HttpGatewaySpec(...))` | opt-in HTTP gateway |
 | `.with_*_plugins_from_entry_points()` | opt-in 扫 entry_points 自动注册（需 `KROW_ENABLE_PLUGIN_ENTRY_POINTS=1`） |
+| `.with_hitl(...)` | 启用 HITL 挂起/续跑（Agent 中途暂停问用户 + 凭 token 断点续跑；详 `api-reference.md` §3.5） |
 | `.build(validate_connection=True)` | 构造 Agent（自动凭证注入 + cloud 模型 fallback） |
+
+#### 6.1.1 HITL 挂起/续跑（人机协同）
+
+垂直场景（如 CAD / 工业软件驱动）经常需要中途停下来与用户确认。启用
+`with_hitl` 后两条挂起路径（设计 SSOT：`docs/sdk/hitl-suspend-resume-design.md`）：
+
+1. **LLM 自主发问**（`allow_llm_questions=True`）：注入 `request_human_input`
+   工具，LLM 信息不足时调用 → run 返回 `suspended=True`；
+2. **强制确认门**（`confirm_before_tools=[...]`）：计划步骤将调用清单内工具前，
+   框架在步骤边界**必停**（System 1 守门，不依赖 LLM 自觉）。
+
+```python
+result = agent.run(goal)
+while result.suspended:
+    answer = my_ui.ask_user(result.suspension["question"])   # 你的 UI / CLI / HTTP
+    result = agent.resume(result.suspension["resume_token"], answer)
+```
+
+要点：
+- **跨进程恢复**：checkpoint 持久化（SQLite），进程重启后新建 Agent 直接
+  `resume(token, answer)` 即可；
+- **多模态答复**：`{"text": ..., "images": [...], "files": [...]}`——图片注入
+  vision part，文件注册 FileCache 供工具读取；
+- **幂等**：token 一次性（CAS）；重复/并发 resume 恰好一个赢，失败自动回滚可重试；
+- **headless**：HTTP `POST /api/v1/agent/resume` + SSE `background_task.suspended`
+  终止事件（详 api-reference §3.5）；
+- 验收脚本：`scripts/repro_hitl_suspend_resume.py`（一键验证挂起→续跑→token 拒重放）。
 
 ```python
 # 阻塞式（返回 AgentV3Result，不是 RunResult）

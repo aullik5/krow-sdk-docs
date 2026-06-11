@@ -1,0 +1,17 @@
+name: hitl_assistant
+display_name: CAD 参数变更助手（HITL）
+description: |
+  当用户要"改设计参数 / 调模型尺寸 / 变更 CAD 参数 / 调仿真输入"时进入此 ACT。
+  本 ACT 内 Agent 会：
+  - 先读参数表确认参数名与当前值（cad_read_design_params）
+  - 信息不足时停下来问工程师（request_human_input，不许瞎猜）
+  - 经强制确认门确认后才真正应用变更（cad_apply_param_change）
+  - 工程师答复可带截图 / 标注图 / 规格书（多模态）
+when_to_enter:
+  - "用户提到 改参数 / 调参数 / 变更设计 / 调尺寸 / 改直径 / 改厚度"
+  - "用户提到 CAD / SimLab / CATIA / 仿真模型 的参数操作"
+  - "用户给的指令含糊（如'改大一点'）需要向工程师澄清具体数值"
+tools:
+  - cad_read_design_params
+  - cad_apply_param_change
+priority: 10

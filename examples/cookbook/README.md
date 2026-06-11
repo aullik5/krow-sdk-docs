@@ -15,6 +15,7 @@
 | 3 | **literature-reviewer** | [`literature-reviewer/`](./literature-reviewer/) | 多 PDF 文献综述（主题聚类 + 章节生成 + 抄袭检测） | ⭐⭐⭐ | 5 类 plugin（CitationCompletenessGate / PlagiarismGate 等）+ BudgetSpec |
 | 4 | **contract-auditor** | [`contract-auditor/`](./contract-auditor/) | 合同审阅（强阻断 Gate + OpenTelemetry tracing） | ⭐⭐⭐⭐ | 6 类 plugin 全用（含 ObservabilityPlugin OpenTelemetry） |
 | 5 | **knowledge-wiki** | [`knowledge-wiki/`](./knowledge-wiki/) | 一批资料 → 结构化知识库（本体 Ontology + 可浏览互链百科词条 wiki） | ⭐⭐⭐⭐ | ToolPlugin × 5（扫描 / 抽取 / 关系 / 物化 / 覆盖核对）· ACTPlugin · GatePlugin（WikiCoverageGate 防"假编译"）· EventListenerPlugin（三阶段进度）+ BudgetSpec |
+| 6 | **hitl-assistant** | [`hitl-assistant/`](./hitl-assistant/) | CAD/仿真参数变更助手（Agent 中途停下来问工程师 → 答复可带截图 → 断点续跑） | ⭐⭐ | **HITL 全 API**（`with_hitl` 强制确认门 / `request_human_input` LLM 自主发问 / `agent.resume` 多模态续跑 / durable checkpoint 跨进程恢复 / 断点管理；需 `krow-agent-sdk >= 0.9.0.5`）· ToolPlugin · ACTPlugin |
 
 > 5 个 cookbook 共演示 SDK 全部 6 类 production plugin（ACTPlugin / ToolPlugin / HintPlugin / GatePlugin / EventListenerPlugin / ObservabilityPlugin）+ BudgetSpec 预算硬约束。knowledge-wiki 额外演示 **System 1 确定性流水线编排 + System 2 单发 LLM**：知识编译走"扫描 → 逐文件抽取 → 关系推断 → wiki 物化 → 覆盖验收"五步确定性流程，而非易空转的巨型 macro-ReACT。
 

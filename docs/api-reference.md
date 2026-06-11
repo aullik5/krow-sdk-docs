@@ -30,6 +30,7 @@
   - [§3.2 `Agent.run_stream()` — 流式执行](#32-agentrun_stream--流式执行)
   - [§3.3 `Agent.shutdown()` — 资源清理](#33-agentshutdown--资源清理)
   - [§3.4 Agent 只读属性](#34-agent-只读属性)
+  - [§3.5 HITL 挂起/续跑 — `with_hitl` / `Agent.resume`](#35-hitl-挂起续跑--with_hitl--agentresume)
 - [§4. 配置 dataclass](#4-配置-dataclass)
   - [§4.1 `BudgetSpec`](#41-budgetspec)
   - [§4.2 `BuilderConfig`](#42-builderconfig)
@@ -766,6 +767,82 @@ def shutdown(self) -> None: ...
 | `agent.visual_adapters` | `tuple[tuple, ...]` | ⚠️ experimental — 所有路径注入的 (file_ext, adapter_class) 列表 |
 | `agent.recommended_budget` | `dict \| None` | ⚠️ experimental — DomainPackPlugin 推荐的 budget |
 | `agent.supplementary_md_providers` | `tuple` | ⚠️ experimental — DomainPack 注入的 extended_md supplement provider |
+
+---
+
+### §3.5 HITL 挂起/续跑 — `with_hitl` / `Agent.resume`
+
+> 设计 SSOT：`docs/sdk/hitl-suspend-resume-design.md`。Agent 可在执行中途暂停向
+> 用户提问（自然语言 + 图片 + 文件答复），凭 `resume_token` 从断点继续，
+> **支持进程重启后续跑**（durable checkpoint）。
+
+#### 启用（builder）
+
+```python
+agent = (
+    AgentBuilder()
+    .with_krow_api_key("sk-user-...")
+    .with_project_root("./proj")
+    .with_hitl(
+        enabled=True,
+        allow_llm_questions=True,            # 注入 request_human_input 工具，LLM 信息不足时自主发问
+        confirm_before_tools=["smart_file_write"],  # 强制确认门：这些工具执行前框架必停（System 1）
+        max_suspensions=5,                   # 单 run 最大挂起次数护栏
+        ttl_seconds=7 * 24 * 3600,           # checkpoint 保留时限
+    )
+    .build()
+)
+```
+
+#### 挂起与续跑
+
+```python
+result = agent.run("把文档翻译成那个语言")     # LLM 发现歧义 → 挂起
+if result.suspended:
+    print(result.suspension["question"])       # 要问用户的问题
+    token = result.suspension["resume_token"]
+
+    # 答复支持多模态（文本 / 图片 / 文件任意组合）
+    result = agent.resume(token, {
+        "text": "翻译成法语，参考附图标注",
+        "images": ["annotated.png"],            # 本地路径 / data-uri / http url
+        "files": ["规格书.pdf"],                # 注入 FileCache 供工具读取
+    })
+    # result 可能再次 suspended=True（多轮往返）
+```
+
+| API | 签名 | 说明 |
+|---|---|---|
+| `Agent.resume` | `(resume_token, human_input, *, stop_event=None) -> AgentV3Result` | `human_input` 接受 `str` / `dict` / `HumanInput`；CAS 幂等（并发/重复 resume 恰好一个赢，中途崩溃自动回滚可重试） |
+| `Agent.list_checkpoints` | `(session_id) -> list[dict]` | 列出会话现存断点（元数据） |
+| `Agent.cancel_checkpoint` | `(resume_token) -> None` | 显式取消；之后 resume → `CheckpointCancelledError` |
+
+#### suspended 结果语义
+
+| 字段 | 说明 |
+|---|---|
+| `result.suspended` | `True` = 等待人工输入（**不是失败**） |
+| `result.suspension["resume_token"]` | 一次性 token；消费后再用 → `CheckpointConsumedError` |
+| `result.suspension["question"]` | LLM / 确认门生成的问题 |
+| `result.suspension["expected_input"]` | `free_text` / `approval` / `selection` / `file` |
+| `result.suspension["options"]` | 可选项列表（selection 场景） |
+| `result.suspension["origin"]` | `llm_tool`（LLM 自主发问）/ `policy_gate`（强制确认门） |
+| `result.suspension["expires_at"]` | checkpoint 过期时间（过期 resume → `CheckpointExpiredError`） |
+
+#### 流式 / headless
+
+- `run_stream()`：挂起以 `agent.task_suspended` 终止事件结束流；resume 重开流。
+- headless HTTP（`api_gateway`）：`POST /api/v1/agent/resume`（body 含 `resume_token` / `text` / `images` / `files`）、`GET /api/v1/agent/checkpoints?session_id=...`、`POST /api/v1/agent/checkpoints/{token}/cancel`；BtQ 发布 `background_task.suspended` 生命周期事件（SSE 终止帧透传 HITL payload）。
+
+#### 错误（`krow_agent_sdk.errors` 同层导出，`modules.agent.hitl.errors`）
+
+| 错误 | 触发 |
+|---|---|
+| `CheckpointNotFoundError` | token 不存在 |
+| `CheckpointConsumedError` | token 已消费（一次性） |
+| `CheckpointExpiredError` | 超 TTL |
+| `CheckpointCancelledError` | 已显式取消 |
+| `CheckpointSchemaMismatchError` | 跨版本 schema 不兼容 |
 
 ---
 
