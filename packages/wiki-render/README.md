@@ -69,7 +69,7 @@ containerEl.addEventListener('click', (e) => {
 | --- | --- | --- |
 | ` ```mermaid ` | `mermaid` | 保留为普通代码块 |
 | ` ```echarts ` | `echarts` | 显示"未加载"提示 + 原始配置 |
-| `$...$` / `$$...$$` | `katex`（含 CSS） | 保留原始 LaTeX 文本 |
+| `$...$` / `$$...$$` / `\(...\)` / `\[...\]` | `katex`（含 CSS） | 保留原始 LaTeX 文本 |
 | 代码高亮 | `highlight.js`（含主题 CSS） | 无高亮的纯代码块 |
 
 > 注：桌面端模板里也写了这些库的加载钩子，但 Python 侧从未真正注入这些库（优雅降级到

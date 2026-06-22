@@ -102,8 +102,18 @@ krow-sdk-install --api-key $KROW_API_KEY --upgrade   # 或 -U
 ```
 
 `--upgrade` 会向 `pip install` 传 `--upgrade`，确保已装旧版本时强制升级（修复"pip 报
-already satisfied 拒绝升级"的体验问题）。CLI 选 wheel 时**总是**在当前 host 兼容的所有
-版本里按 PEP 440 选**最新**（不再受 index HTML 顺序影响）。
+already satisfied 拒绝升级"的体验问题）。
+
+> ⚠️ **默认对齐已安装 SDK 版本（2026-06-17）**：不带 `--version` / `--latest` 时，
+> CLI 会自动把 runtime 对齐到当前环境已安装的 `krow-agent-sdk` 版本（二者同出一份
+> 版本 SSOT，应逐段一致），避免 "base image 版本不匹配"。要显式取最新 runtime（忽略
+> 已装 SDK 版本）用 `--latest`：
+> ```bash
+> krow-sdk-install --api-key $KROW_API_KEY --latest --upgrade
+> ```
+> 若选中的 runtime 与已装 SDK 版本不一致（含主动 `--latest` / `--version` 覆盖），CLI 会
+> 打印一条告警并给出对齐命令；未安装 SDK 时回退选最新。选 wheel 时在当前 host 兼容范围
+> 内按 PEP 440 选**最新**（不再受 index HTML 顺序影响）。
 
 本地安装损坏 / 想强制重装同版本时加 `--force-reinstall`（隐含 `--upgrade` 行为）：
 
@@ -121,6 +131,23 @@ krow-sdk-install --api-key $KROW_API_KEY --version 0.8.12      # 段前缀：命
 `--version` 支持**精确**或**段前缀**匹配（按 `.` 分段）：`0.8.12` 命中 `0.8.12.60`，但
 `0.8.1` **不会**误命中 `0.8.12.*`（段比对 `1` ≠ `12`）。指定版本在当前 host 兼容范围内
 不存在时 fail-loud（列出可用版本清单）。
+
+### 2.2.2 ⚠️ `uv sync` / `poetry install` 会卸载 runtime（重装兜底）
+
+`krow-agent-sdk-runtime` 经 `krow-sdk-install` 单独安装（账号 entitlement，**不能**写进
+`pyproject.toml` / `uv.lock`）。因此**裸 `uv sync` / `poetry install --sync` 会把它当
+"不在 lock 里的多余包"卸载**，之后 `import modules.*` 报 `No module named 'modules'`，
+SDK `build()` 期 `probe_tool_manager_importable()` 也会 fail-loud。
+
+解法：在依赖同步后**自动重装 runtime wheel**。推荐包一层脚本（CI / Dockerfile 同理）：
+
+```bash
+uv sync                                            # 或 poetry install
+krow-sdk-install --api-key "$KROW_API_KEY" --force-reinstall
+```
+
+由于 §2.1 默认按已装 SDK 版本对齐，这一步会重装与 `uv.lock` 锁定 SDK 完全一致的
+runtime 版本，避免重装时又拿到不一致的最新版。
 
 ### 2.2.1 自定义 Cloud endpoint（staging / 私有部署）
 

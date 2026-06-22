@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-reasoning-analyst"
+version = "0.1.0"
+description = "Krow SDK Cookbook · 纯 SDK 推理洞察管线 demo（链式证据 / 竞争假设排除 → 带证据落点的结论）"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "krow-agent-sdk>=0.9.0",
+    # reasoning 管线本体预载 / 图分析需要 ontology extras（jieba + networkx）
+    "krow-agent-sdk[ontology]>=0.9.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+    # journey_e2e expected_card 读取需要 PyYAML（_journey_e2e_helpers.py:load_expected_card）
+    "PyYAML>=6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "reasoning_journeys.py",
+    "main.py",
+    "sample_data/**",
+    "README.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "reasoning_journeys.py",
+    "main.py",
+    "sample_data/**",
+    "README.md",
+    "tests/**",
+    "pyproject.toml",
+    ".gitignore",
+]

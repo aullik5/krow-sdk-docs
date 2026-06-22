@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Demo runtime outputs (never commit)
+output/
+reasoning_project/
+
+# Local env
+.env
+.env.*
+*.local
+
+# IDE
+.idea/
+.vscode/

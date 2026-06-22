@@ -43,6 +43,39 @@ const hasECharts = () => typeof window !== 'undefined' && typeof window.echarts 
 const hasKaTeX = () => typeof window !== 'undefined' && typeof window.katex !== 'undefined';
 const hasHljs = () => typeof window !== 'undefined' && typeof window.hljs !== 'undefined';
 
+const MATH_TOKEN_RE = /zzKTXMATH(\d+)ENDZZ/g;
+
+/**
+ * 在 markdown 解析**之前**抠出数学公式，替换为纯字母数字占位符（与桌面
+ * `wiki_view.py:_protect_math` 同构）。**必须前置**：markdown-it 把 tex 里的
+ * `_`/`*` 当语法、且 CommonMark 反斜杠转义会把 `\[`→`[` / `\(`→`(` 吞掉定界符，
+ * 故 `\[..\]` / `\(..\)` 无法在渲染后再扫描——只能渲染前保护。
+ * 支持 4 种定界符（display: `$$..$$` / `\[..\]`；inline: `\(..\)` / `$..$`）。
+ * @returns {{ text: string, store: Array<[boolean, string]> }}
+ */
+function protectMath(text) {
+  const store = [];
+  const stash = (display, tex) => { store.push([display, tex]); return `zzKTXMATH${store.length - 1}ENDZZ`; };
+  let out = String(text == null ? '' : text);
+  // display 先抠（非贪婪避免跨块吞噬）
+  out = out.replace(/\$\$([\s\S]+?)\$\$/g, (_m, t) => stash(true, t));
+  out = out.replace(/\\\[([\s\S]+?)\\\]/g, (_m, t) => stash(true, t));
+  // inline 后抠
+  out = out.replace(/\\\(([\s\S]+?)\\\)/g, (_m, t) => stash(false, t));
+  out = out.replace(/(?<![\\$])\$([^$\n]+?)\$/g, (_m, t) => stash(false, t));
+  return { text: out, store };
+}
+
+/** 把占位符还原成 KaTeX 待渲染 span（在 md.render 之后）。 */
+function restoreMath(html, store) {
+  return html.replace(MATH_TOKEN_RE, (m, idx) => {
+    const entry = store[Number(idx)];
+    if (!entry) return m;
+    const [display, tex] = entry;
+    return `<span class="katex-math" data-display="${display ? 'true' : 'false'}">${escapeHtml(String(tex).trim())}</span>`;
+  });
+}
+
 /**
  * 构造与桌面 markdown-it-py 对齐的 MarkdownIt 实例。
  * 桌面配置（ui/wiki_view.py:_markdown_to_html）：
@@ -141,16 +174,24 @@ function processECharts(container) {
 
 function processKaTeX(container) {
   if (!hasKaTeX()) return;
-  let html = container.innerHTML;
-  html = html.replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => {
-    try { return window.katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false }); }
-    catch (e) { return m; }
+  // markdownToHtml 已在解析前把 4 种定界符公式保护成 <span class="katex-math">RAW_TEX</span>
+  // （绕过 markdown mangle + CommonMark 反斜杠转义吞 \[ \(）。这里只渲染这些 span。
+  container.querySelectorAll('span.katex-math').forEach((el) => {
+    if (el.dataset.rendered === '1') return;
+    const tex = el.textContent || '';
+    const display = el.getAttribute('data-display') === 'true';
+    try {
+      el.innerHTML = window.katex.renderToString(tex, { displayMode: display, throwOnError: false });
+      el.dataset.rendered = '1';
+    } catch (e) { /* 渲染失败保留原始 tex 文本，fail-soft */ }
   });
-  html = html.replace(/(?<![\\$])\$([^$\n]+?)\$/g, (m, tex) => {
-    try { return window.katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false }); }
-    catch (e) { return m; }
-  });
-  container.innerHTML = html;
+  // 兜底：极少数未走保护路径的裸 $$..$$（如 allowHtml 直传 / 旧缓存内容）。
+  if (/\$\$[\s\S]+?\$\$/.test(container.innerHTML)) {
+    container.innerHTML = container.innerHTML.replace(/\$\$([\s\S]+?)\$\$/g, (m, tex) => {
+      try { return window.katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false }); }
+      catch (e) { return m; }
+    });
+  }
 }
 
 function processHighlight(container) {
@@ -193,9 +234,11 @@ export function createWikiRenderer({ MarkdownIt, allowHtml = false } = {}) {
   if (!MarkdownIt) throw new Error('createWikiRenderer 需要传入 MarkdownIt（npm i markdown-it）');
   const md = buildMarkdownIt(MarkdownIt, { allowHtml });
 
-  /** Markdown 字符串 → HTML（含 [[wiki-link]] 转换），不做 DOM 后处理 */
+  /** Markdown 字符串 → HTML（含 [[wiki-link]] 转换 + 公式保护），不做 DOM 后处理。
+   *  公式被还原成 <span class="katex-math">RAW_TEX</span>，交由 processKaTeX 渲染。 */
   function markdownToHtml(text) {
-    return transformWikiLinks(md.render(text || ''));
+    const { text: protectedText, store } = protectMath(text || '');
+    return restoreMath(transformWikiLinks(md.render(protectedText)), store);
   }
 
   /**

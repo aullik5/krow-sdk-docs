@@ -1,0 +1,45 @@
+# 校本/题库特化领域包示例（继承内置 k12_math）。
+#
+# SDK 开发者二次开发模式：不重写 k12_math，而是 parent_pack 继承它，
+# 再追加自有业务的实体/关系。这里演示挂上"题目（question）"实体 +
+# "题目考查知识点（tests）"关系，做题库→知识点的练习/考查链路。
+#
+# 用法：AgentBuilder().with_domain_pack_manifest("k12_school_pack.yaml")
+id: k12_school
+display_name: K12 数学（校本题库特化）
+description: 在内置 k12_math 之上追加题库实体与考查关系，用于练习/测评场景。
+version: "0.1.0"
+parent_pack: k12_math
+
+entity_kinds_extend:
+  - question        # 题目
+  - error_pattern   # 易错点
+
+relation_kinds_extend:
+  - tests           # 题目 → 知识点（考查）
+  - may_trigger_error  # 题目/步骤 → 易错点
+
+# 在内置 detection 之外追加校本资料的触发词（auto-detect 用）。
+detection_keywords:
+  - 例题
+  - 习题
+  - 易错
+  - 错因
+
+# 题库关系的属性 spec（System 1 coerce + 校验）。
+edge_field_specs:
+  tests:
+    weight:
+      type: number
+      min: 0.0
+      max: 1.0
+      default: 1.0
+      desc: 该题对此知识点的考查权重（同一题对多知识点权重和应≈1）
+
+node_field_specs:
+  question:
+    difficulty:
+      type: number
+      min: 0.0
+      max: 1.0
+      desc: 题目综合难度（0 易 ~ 1 难）

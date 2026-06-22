@@ -1,0 +1,31 @@
+# reasoning-analyst Tier 1 预期结果卡（evidence_chain 链式证据 journey）
+#
+# 多维断言（System 1 · 零 LLM 二级判官）；详 _journey_e2e_helpers.assert_journey。
+# 设计取舍：reasoning 结论文本结构由 LLM 自由发挥（非固定 markdown 模板），故只断言
+# 产物存在 + 结构化 json 含关键字段 + 最小字节，内容级硬下界由测试自定义断言负责。
+
+exit_code: 0
+
+# walltime（serial 单跑 / parallel 同进程多 journey）
+max_walltime_s_serial: 900
+max_walltime_s_parallel: 1350
+
+required_artifacts:
+  - reasoning_evidence_chain.md
+  - reasoning_evidence_chain.json
+  - summary.json
+
+min_artifact_bytes:
+  reasoning_evidence_chain.md: 200
+  reasoning_evidence_chain.json: 200
+  summary.json: 80
+
+# 结构化结论 json 必含的判定字段（证明 cookbook 的 outcome schema 落盘正确）
+required_keywords_in:
+  reasoning_evidence_chain.json:
+    - reasoning_completed
+    - final_output
+    - strategy
+  summary.json:
+    - n_completed
+    - reasoning_completed

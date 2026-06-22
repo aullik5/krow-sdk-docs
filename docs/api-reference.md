@@ -21,6 +21,7 @@
   - [§2.4 预算与 HTTP Gateway](#24-预算与-http-gateway)
   - [§2.5 Plugin 直接注入（6 stable + 3 experimental）](#25-plugin-直接注入6-stable--3-experimental)
   - [§2.6 Visual Adapter 注入（3 路径）](#26-visual-adapter-注入3-路径)
+  - [§2.6.1 Document Parser 注入（2 路径）](#261-document-parser-注入2-路径)
   - [§2.7 entry_points 自动发现（8 个 + 1 个 all）](#27-entry_points-自动发现8-个--1-个-all)
   - [§2.8 测试注入](#28-测试注入)
   - [§2.9 LLM Record/Replay 接入](#29-llm-recordreplay-接入)
@@ -46,6 +47,7 @@
   - [§5.8 `SecurityPlugin` — 安全策略 (P8, ⚠️ experimental)](#58-securityplugin--安全策略-p8--experimental)
   - [§5.9 `DomainPackPlugin` — 一站式 (P9, ⚠️ experimental)](#59-domainpackplugin--一站式-p9--experimental)
   - [§5.10 `VisualAdapterPlugin` — 视觉适配器 (P10, ⚠️ experimental)](#510-visualadapterplugin--视觉适配器-p10--experimental)
+  - [§5.11 `DocumentParserPlugin` — 文档解析器 (P11)](#511-documentparserplugin--文档解析器-p11)
 - [§6. EventBus 与流式事件](#6-eventbus-与流式事件)
   - [§6.1 `EventBusReader`](#61-eventbusreader)
   - [§6.2 `StreamItem` / `StreamItemKind`](#62-streamitem--streamitemkind)
@@ -307,6 +309,43 @@ agent = (
 )
 ```
 
+#### `with_tool_execution_timeout(timeout: int | dict[str, int]) -> AgentBuilder` (FR-2 · 2026-06-15)
+
+设置**单工具执行超时**。micro ReACT 单次工具调用默认硬超时仅 30s（内置
+`long_running` 工具 300s），且**动态注册的 MCP 工具进不了静态 trait 表** → 长耗时
+工具（CAE 网格剖分 10–15min、装配导入 ~280s、离线建库）会被误杀并触发整步重试。
+
+本 API 是替代对 `ReACTEngine.TOOL_EXECUTION_TIMEOUT` / `ToolTraitRegistry` 等
+internal 符号做 monkey-patch 的**公开**入口（patch internal 符号 SDK 升级即静默失效）。
+
+| 入参形态 | 语义 |
+|---|---|
+| `int`（全局） | 所有工具步执行超时的**下限**（不缩短既有 `long_running` / `verify_fix` 保护） |
+| `{tool_name: seconds}`（per-tool） | 对指定工具**精确生效**（"指定即采用"，可长可短，优先级最高） |
+
+- **上限**：3600s（`AgentBuilder.TOOL_EXEC_TIMEOUT_HARD_CAP`）。超限 / ≤0 / 非正整数
+  / 空 dict / 空工具名 → 立即抛 `ValueError`（fail-loud，防旁路注入超大值拖死无人值守 Pod）。
+- **优先级**：显式 `with_tool_execution_timeout` > `BudgetSpec.tool_execution_timeout_s`
+  （`from_config` 路径可经 `BudgetSpec` 字段配同一全局下限）。
+- **per-run 覆盖**：等价于在 `Agent.run(task_context={"tool_execution_timeout": ...})`
+  注入；builder 默认值用 `setdefault` 语义，per-run 显式值优先。
+
+```python
+# 全局下限：所有工具步至少 280s
+agent = (
+    AgentBuilder().with_krow_api_key(...).with_project_root(...)
+    .with_tool_execution_timeout(280)
+    .build()
+)
+
+# per-tool 精确：CAE 网格剖分单独给 900s，其余不变
+agent = (
+    AgentBuilder().with_krow_api_key(...).with_project_root(...)
+    .with_tool_execution_timeout({"cae_mesh_solve": 900, "cae_assembly_import": 300})
+    .build()
+)
+```
+
 #### `with_base_url(url: str) -> AgentBuilder` (W4 新增 · staging / 私有部署)
 
 覆盖默认 cloud API base URL（`https://api.krow.cn`），用于：
@@ -385,6 +424,12 @@ agent = (
 
 每个方法的入参均为该 Protocol 的实现实例。多次调用自然累加（不会替换）。
 
+> **声明式领域包（非 plugin 路径）**：知识编译（`strategy=knowledge_compile`）场景下，
+> 激活/扩展领域本体**无需写 plugin**——直接 `.with_domain_pack("k12_math")` 激活内置包，
+> 或 `.with_domain_pack_manifest("my_pack.yaml")` 程序化注册自定义包（支持 `parent_pack`
+> 继承）。指定不存在的 pack_id → `UnknownDomainPackError`（fail-loud）。完整说明与
+> System 1 评分工具见 `advanced-development-guide.md` §6.1.2。
+
 ```python
 agent = (
     AgentBuilder().from_env()
@@ -442,6 +487,53 @@ agent = (
 #### `with_visual_adapter_plugin(plugin: VisualAdapterPlugin) -> AgentBuilder` (⚠️ experimental)
 
 注册 [VisualAdapterPlugin](#510-visualadapterplugin--视觉适配器-p10--experimental) 实例，支持一次性返回多 (ext, cls) 对 + lifecycle hook。
+
+---
+
+### §2.6.1 Document Parser 注入（2 路径）
+
+> 自 2026-06-13 起公开。
+> 把自定义解析器注册为某扩展名的**默认**解析器：agent 内 `smart_read_document` 读该
+> 扩展名文件时**物理路由**到你的解析器（System 1 闸门，LLM/planner 无感知，不依赖
+> prompt 提示）。`shutdown()` 自动 unregister。
+
+#### `with_document_parser(extension: str, parser: Any) -> AgentBuilder`
+
+```python
+class DatasheetParser:
+    def parse(self, file_path: str) -> dict:
+        if not looks_like_datasheet(file_path):
+            return {"abstain": True, "reason": "非元器件 datasheet"}  # 回落内置链
+        return {"success": True, "content": run_pipeline(file_path)}
+
+agent = (
+    AgentBuilder().from_env()
+    .with_document_parser(".pdf", DatasheetParser())
+    .build()
+)
+```
+
+**解析器契约（三态返回）**：
+
+| 返回 | 语义 | 后续 |
+|---|---|---|
+| `{"success": True, "content": ..., ...}` | 正常产物 | 直接作为 `smart_read_document` 输出（额外字段透传，附 `parser_source`） |
+| `{"abstain": True, "reason": ...}` | 显式弃权 | 回落内置解析链（混合语料中非本域文件的**唯一**合法 fallback 通道） |
+| `{"success": False, "error": ...}` 或抛异常 | 失败 | **fail-loud 透传**，不回落内置链（防 silent fallback 掩盖真因） |
+
+| 校验 | 行为 |
+|---|---|
+| `extension` 非 `.` 开头 | `ValueError`（注册期） |
+| `parser` 非 callable 且无 `parse` 方法 | `ValueError`（注册期） |
+| 同 ext 重复注册 | 后注册者覆盖（log 留痕） |
+
+> **与定向读取原语的关系**：`smart_read_document` 的 `pages` / `scan_keywords` /
+> `layout_mode` 定向参数不经过自定义解析器；解析器内部可直接复用这些语法层原语
+> （`from modules.tools.builtins.document_reader_tools import read_pdf_pages, scan_pdf_keywords`）。
+
+#### `with_document_parser_plugin(plugin: DocumentParserPlugin) -> AgentBuilder`
+
+注册 [DocumentParserPlugin](#511-documentparserplugin--文档解析器-p11) 实例，一次性返回多 (ext, parser) 对 + `on_load`/`on_unload` lifecycle hook + `plugin_id` 审计标识。
 
 ---
 
@@ -844,6 +936,43 @@ if result.suspended:
 | `CheckpointCancelledError` | 已显式取消 |
 | `CheckpointSchemaMismatchError` | 跨版本 schema 不兼容 |
 
+#### per-run HITL 覆盖 — `run(task_context={'hitl': {...}})`（Stable）
+
+`with_hitl` 设置的是 **builder 全局** HITL 策略（对该 Agent 的所有 run 生效）。若某次
+调用需要**不同**的 HITL 策略（如只对高风险任务开确认门、对批量任务临时关 HITL），
+在 `run` / `run_stream` / `arun` 传 `task_context={'hitl': {...}}` 即可**逐次覆盖**：
+
+```python
+agent = (
+    AgentBuilder().with_krow_api_key("sk-user-...").with_project_root("./proj")
+    .with_hitl(enabled=True, allow_llm_questions=True)   # builder 全局默认
+    .build()
+)
+
+# 本次 run 改用更严格的确认门（覆盖 builder 全局）
+result = agent.run(
+    "批量改写这批合同",
+    task_context={"hitl": {
+        "enabled": True,
+        "confirm_before_tools": ["smart_file_write", "terminal_execute"],
+    }},
+)
+
+# 本次 run 临时关闭 HITL（无人值守批处理）
+result = agent.run("生成日报", task_context={"hitl": {"enabled": False}})
+```
+
+| 契约 | 语义 |
+|---|---|
+| **优先级** | `task_context['hitl']`（per-run）> `with_hitl`（builder 全局）。`setdefault` 语义：调用方显式传入即采用，框架不覆盖（'指定即采用'）。 |
+| **无 builder 默认时** | 即使**未调** `with_hitl`，per-run `task_context['hitl']` 仍生效（该次 run 独立启用 HITL）。 |
+| **作用域** | 仅本次 `run`/`run_stream`/`arun` 调用；不改变 Agent 的 builder 全局策略，下次调用仍回落到 `with_hitl`（或无）。 |
+| **dict 形态** | 与 `with_hitl` 参数同构（`enabled` / `allow_llm_questions` / `confirm_before_tools` / `max_suspensions` / `ttl_seconds`）。运行时由 `ProgressiveExecutor` 经 `task_context['hitl']` → `_HitlPolicy.from_dict` 消费。 |
+
+> **稳定性**：本 per-run 覆盖契约为 **Stable**——`setdefault('hitl', ...)`（调用方优先）
+> 语义受版本治理保护，breaking 变更须 MAJOR bump + 提前 1 release deprecation 警告
+> （与 `with_hitl` 同级）。守门测试见 §3.5 对应 contract test。
+
 ---
 
 ## §4. 配置 dataclass
@@ -861,6 +990,7 @@ class BudgetSpec:
     micro_max_iterations: int = 8
     micro_max_time_ms: int = 180_000
     max_plan_steps: int = 20
+    tool_execution_timeout_s: int = 0  # FR-2：单工具执行超时全局下限（0=不覆盖）
 ```
 
 | 字段 | 单位 | 默认 | 含义 |
@@ -873,6 +1003,7 @@ class BudgetSpec:
 | `micro_max_iterations` | 次 | 8 | **通用工具步** micro ReACT 的默认最大迭代数（仅约束无特化 tuning 的通用步；ACT yaml `react_config` 与 `content_source`/`terminal_execute` 等特化值优先级更高）。经 `task_context['micro_budget']` 接入运行时 |
 | `micro_max_time_ms` | 毫秒 | 180000 | **通用工具步** micro ReACT 默认最大墙钟（`terminal_execute` 保 300s 底线）。经 `task_context['micro_budget']` 接入运行时 |
 | `max_plan_steps` | 个 | 20 | **macro plan 步数上限**（一次任务最多执行多少个宏观 plan step）。运行时夹紧到 `[12, 40]`：**下限 12**（设更小会被抬到 12；低于 12 仅内置 Strategy contract 可声明），**上限 40**。长流程自定义 ACT 需调高 |
+| `tool_execution_timeout_s` | 秒 | 0 | **单工具执行超时全局下限**（FR-2）。`0` = 不覆盖（走运行时默认 30s / 300s）。`from_config` 路径的全局配法；per-tool 精确控制用 `AgentBuilder.with_tool_execution_timeout({tool: s})`（优先级更高）。上限 3600s |
 
 > **建议起点**（外部开发者）：默认值适合"中等复杂度任务（写报告、PPT）"。如任务很轻（如简单文本归纳）可把 `max_total_llm_calls` 降到 30-60；如任务重（深度研究 + 跨工具协作）可升到 200。
 > **长流程自定义 ACT 必读**：若你的 ACT 业务阶段较多（如 7+ 阶段），planner（LLM）可能动态拆成 15~20 个 macro 步；默认 `max_plan_steps=20` 通常够用，但若仍被 `safety_net:max_steps` 提前收尾，请显式调高（上限 40）：
@@ -1442,6 +1573,55 @@ class CADVisualAdapter(VisualAdapter):
 
 ---
 
+### §5.11 `DocumentParserPlugin` — 文档解析器 (P11)
+
+> 2026-06-13 新增。
+> 把自定义文档解析器注册为某扩展名的**默认**解析器——agent 内 `smart_read_document`
+> 读该扩展名文件时 System 1 物理路由到你的解析器，LLM/planner 无感知。
+> 典型场景：垂直领域 PDF 结构化解析（元器件 datasheet、法律合同、医疗报告等）。
+
+```python
+from krow_agent_sdk.protocols import DocumentParserPlugin  # Protocol（structural typing）
+
+class DatasheetParser:
+    def parse(self, file_path: str) -> dict:
+        if not self._looks_like_datasheet(file_path):
+            return {"abstain": True, "reason": "非元器件 datasheet"}
+        return {"success": True, "content": self._pipeline(file_path)}
+
+class KadPdfPlugin:
+    plugin_id = "kad.eda_datasheet_parser"
+
+    def get_document_parsers(self):
+        return [(".pdf", DatasheetParser())]
+
+    # 可选 lifecycle hook
+    def on_load(self, ctx): ...
+    def on_unload(self): ...
+```
+
+| 字段 / 方法 | 约束 |
+|---|---|
+| `plugin_id` | 全局唯一（审计 / 注册来源标识） |
+| `get_document_parsers()` | 返回 `list[(file_ext, parser)]`；`file_ext` 以 `.` 开头；`parser` 为 callable 或带 `parse(file_path) -> dict` 方法的对象 |
+
+**解析器三态返回契约**（与 [§2.6.1](#261-document-parser-注入2-路径) 相同）：正常产物 dict / `{"abstain": True}` 回落内置链 / 失败（`success=False` 或抛异常）fail-loud 透传不回落。
+
+> 多 plugin 注册同 ext → **后注册者覆盖**前者。
+> 与 `with_document_parser(ext, parser)` 的关系：同 Visual Adapter 双路径模式——inline 适合单对快速注册（无 lifecycle），plugin 适合多对 + lifecycle + 审计标识。
+
+#### 配套：`smart_read_document` PDF 定向读取原语
+
+解析器内部（或任何 agent 任务）可用 `smart_read_document` 的可选参数做语法层转写，不必自研 PDF 底层：
+
+| 参数 | 类型 | 作用 |
+|---|---|---|
+| `pages` | `str`（如 `"21-26,80"`，1-based） | 只转写指定页（大 PDF 必用，避免全文转储超上下文；单次上限 100 页） |
+| `scan_keywords` | `list[str]`（≤ 50 个） | 确定性关键词→页码命中图（不返回正文，零 LLM 成本定位关键页；大小写不敏感；可与 `pages` 组合限定扫描范围） |
+| `layout_mode` | `"plain"` / `"words"` / `"tables"` | `words` = words+bbox 行聚类转写（保留几何关系，结构化坐标在 `transcription.pages[].words`）；`tables` = 表格转写，输出携带 `transcription_method`（`find_tables` / `words_row_cluster`）+ `confidence`（`high` / `low`）标记，低置信产物**不应直接采信**，需下游确定性校验 |
+
+---
+
 ## §6. EventBus 与流式事件
 
 ### §6.1 `EventBusReader`
@@ -1863,6 +2043,9 @@ from krow_agent_sdk import diagnostics
 | `diagnostics.get_hint_snapshot()` | `() -> dict` | `count` + `plugin_ids[]` |
 | `diagnostics.get_observability_snapshot()` | `() -> dict` | `count` + `plugin_ids[]` |
 | `diagnostics.get_event_subscription_snapshot()` | `() -> dict` | `topics: {topic: count}` + `total_subscribers` |
+| `diagnostics.get_overlay_snapshot(store_path=None)` | `(str\|None) -> dict` | 慢环 learned overlay 只读快照：`store_path` / `exists` / `count` / `by_status{candidate,active,demoted}` / `by_tier{0,1}` / `lessons[{id,text,tier,status,lesson_type,recurrence,positive_outcomes,negative_outcomes,disclosure_triggers,...}]` |
+
+> `get_overlay_snapshot` 用于审视双环元认知**慢环**的睡眠蒸馏结果（哪些教训是候选 / 已晋级 active / 复现与正负反馈计数）。字段语义 / 晋级阈值 / 维护方式见 [`advanced-development-guide.md`](./advanced-development-guide.md)「双环元认知与运行时自进化」。
 
 #### 设计约束
 
@@ -2237,6 +2420,20 @@ finally:
 | `KROW_SDK_TELEMETRY_ENABLED` | `0` | 是否反向上报 telemetry |
 | `KROW_HEADLESS` | `0` | 主仓 headless 模式（影响内置 Visual Adapter 选择） |
 
+#### 双环元认知 / 运行时自进化 kill switch（默认全 **ON**）
+
+> 这些 flag 控制 [`advanced-development-guide.md`](./advanced-development-guide.md)「双环元认知与运行时自进化」描述的快环（认知负荷软提示）+ 慢环（睡眠蒸馏 / overlay 注入 / 晋级）。**默认全开**，设 `0`/`false`/`off`/`no` 关闭对应环节。
+
+| env var | 默认 | 用途 |
+|---|---|---|
+| `KROW_METACOG_PROVIDER` | `1` | 快环：strained/overload 时注入认知负荷软提示到 prompt |
+| `KROW_GOAL_GAP_FEEDER` | `1` | 快环：预算-目标背离（budget-goal divergence）感知与软提示 |
+| `KROW_OVERLOAD_RESOLVE` | `1` | 快环：overload 时尝试无损过载重整 |
+| `KROW_SLEEP_PHASE` | `1` | 慢环：睡眠期蒸馏（按簇聚类高频信号 → candidate 教训） |
+| `KROW_OVERLAY_INJECT` | `1` | 慢环：把 active overlay 教训按 disclosure_triggers 注入 prompt |
+| `KROW_OVERLAY_BEHAVIOR_CHANGE` | `1` | 慢环：允许 behavior-change 类教训晋级（软启动低权重） |
+| `KROW_OVERLAY_FULL_WEIGHT` | `1` | 慢环：允许 behavior-change 教训长期在线正向后升全权重（否则封顶 0.7） |
+
 #### Feature flag 协议
 
 | 真值 | 假值 |
@@ -2361,7 +2558,7 @@ from krow_agent_sdk.visual import (
 from krow_agent_sdk.diagnostics import (
     dump_state, get_plugin_snapshot, get_tool_snapshot,
     get_hint_snapshot, get_observability_snapshot,
-    get_event_subscription_snapshot,
+    get_event_subscription_snapshot, get_overlay_snapshot,
 )
 
 # Data facade

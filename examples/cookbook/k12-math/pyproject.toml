@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-k12-math"
+version = "0.1.0"
+description = "Krow SDK Cookbook · K12 数学知识编译 demo（教材/讲义 → 教育知识图谱 + 学习路径校验）"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "krow-agent-sdk>=0.8.12.5",
+    # 本体管线 + 学习路径图分析（前置 DAG 环检测用 networkx）
+    "krow-agent-sdk[ontology]>=0.8.12.5",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+    "PyYAML>=6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "main.py",
+    "k12_school_pack.yaml",
+    "sample_data/**",
+    "README.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "main.py",
+    "k12_school_pack.yaml",
+    "sample_data/**",
+    "README.md",
+    "tests/**",
+    "pyproject.toml",
+]

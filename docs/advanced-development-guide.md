@@ -25,6 +25,7 @@
 | §6 | 关键基础设施速查（公开 SDK 暴露的接口） | 写代码时按需 |
 | §7 | 测试方法论（Plugin 单测 + record/replay + 真实 LLM 验证） | 验收前 |
 | §8 | 反模式黑名单（铁证支撑） | 写完前 review |
+| §9 | 双环元认知与运行时自进化（快环软提示 + 慢环睡眠蒸馏 / overlay） | 想观测/维护 agent 自进化 |
 
 ---
 
@@ -1149,10 +1150,14 @@ from krow_agent_sdk import (
 | `.with_observability_plugin(plugin)` | 注册 ObservabilityPlugin |
 | `.with_mcp_server_plugin(plugin)` | 注册 MCPServerPlugin（experimental，需 `KROW_ENABLE_MCP_SERVER_PLUGIN=1`）|
 | `.with_security_plugin(plugin)` | 注册 SecurityPlugin（experimental）|
-| `.with_domain_pack_plugin(plugin)` | 注册 DomainPackPlugin（experimental）|
+| `.with_domain_pack(pack_id)` | 激活内置/已注册领域包（声明式，**无需写 plugin**；如 `"k12_math"`/`"medical"`；不存在 → `UnknownDomainPackError` fail-loud；详 §6.1.2）|
+| `.with_domain_pack_manifest(manifest, activate=True)` | 程序化注册自定义领域包（`dict` / `.yaml` 路径 / `DomainPackManifest`，可 `parent_pack` 继承内置包）|
+| `.with_domain_pack_plugin(plugin)` | 注册 DomainPackPlugin（experimental，聚合 hint/tool/gate）|
 | `.with_visual_adapter(ext, cls)` | 注册 VisualAdapter（按文件扩展名）|
 | `.with_visual_adapter_plugin(plugin)` | 注册 VisualAdapterPlugin（批量）|
 | `.with_default_pptx_adapter()` | 一行打开 PPTX 视觉质检 |
+| `.with_document_parser(ext, parser)` | 注册自定义文档解析器为该扩展名**默认**解析器（System 1 物理路由；abstain 可回落内置链；详 `api-reference.md` §2.6.1）|
+| `.with_document_parser_plugin(plugin)` | 注册 DocumentParserPlugin（批量 + lifecycle；详 `api-reference.md` §5.11）|
 | `.with_replay_store(store)` | 走 record/replay 测试模式 |
 | `.with_budget(BudgetSpec(...))` | 自定义预算 |
 | `.with_http_gateway(HttpGatewaySpec(...))` | opt-in HTTP gateway |
@@ -1186,6 +1191,98 @@ while result.suspended:
 - **headless**：HTTP `POST /api/v1/agent/resume` + SSE `background_task.suspended`
   终止事件（详 api-reference §3.5）；
 - 验收脚本：`scripts/repro_hitl_suspend_resume.py`（一键验证挂起→续跑→token 拒重放）。
+
+#### 6.1.2 声明式领域包（Domain Pack · 知识编译二次开发）
+
+垂直领域（K12 教育 / 医学 / 法律…）做知识编译时，"该抽哪些实体/关系、wiki 该有哪些章节、
+图分析该校验什么不变量" 各不相同。**领域包（domain pack）** 把这些差异声明在一份
+`manifest.yaml` 里（实体/关系 kind、few-shot、planner hint、字段 spec、System 1 评分配置），
+让同一套引擎按领域本体编译——**不用改引擎、不用写 plugin**。
+
+**用法 A · 激活内置领域包**（一行）：
+
+```python
+from krow_agent_sdk import AgentBuilder
+
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(api_key)
+    .with_project_root("./k12_kb")
+    .with_domain_pack("k12_math")          # 激活内置 K12 数学包
+    .build()
+)
+# K12 资料 → 知识点/定义/定理/公式/原子知识/原子技能 + part_of / requires_* /
+# prerequisite_of 学习路径骨架；conclude 时自动校验学习路径无环（DAG）。
+result = agent.run("把这些教材编译成知识库与百科词条",
+                   task_context={"strategy": "knowledge_compile"})
+```
+
+> 指定不存在的 pack_id → `UnknownDomainPackError`（fail-loud，遵循"指定≠采用"铁律，
+> 绝不静默回退到默认包）。`with_domain_pack` 会合并项目已激活的包（`active_packs.yaml`）。
+
+**用法 B · 自定义/校本领域包**（继承内置包再扩展）：
+
+```yaml
+# k12_school_pack.yaml —— 在内置 k12_math 上加题库实体与 TESTS 关系
+id: k12_school
+display_name: K12 校本题库包
+parent_pack: k12_math               # 继承 k12_math 的全部实体/关系/few-shot
+entity_kinds_extend:
+  - kind: question
+    description: 一道题（题干 + 难度 + 知识点标签）
+relation_kinds_extend:
+  - kind: tests                     # Question --tests--> KnowledgePoint
+    description: 题考查某知识点
+edge_field_specs:
+  tests:
+    weight: {type: float, min: 0.0, max: 1.0, default: 1.0}
+```
+
+```python
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(api_key)
+    .with_project_root("./k12_kb")
+    .with_domain_pack_manifest("k12_school_pack.yaml")   # dict / yaml 路径 / DomainPackManifest
+    .build()
+)
+```
+
+**System 1 评分/校验工具**（零 LLM，可在 pipeline 后处理直接调）：
+
+```python
+from modules.knowledge.k12_scoring import (
+    detect_prerequisite_cycles,   # 学习路径前置 DAG 环检测（networkx + Kahn 兜底）
+    aggregate_dimensions,         # 多维难度/掌握度加权聚合
+    normalize_weights,            # 权重归一到和为 1
+)
+from modules.knowledge.global_ontology_metrics import iter_relation_pairs
+
+edges = list(iter_relation_pairs("prerequisite_of"))
+report = detect_prerequisite_cycles(edges)
+assert report.is_dag, f"学习路径有环：{report.cycles}"
+```
+
+**数学公式 LaTeX 增强**（图片公式 → LaTeX；复用 metafile 栅格化 + 视觉 LLM）：
+K12 讲义里公式常以 WMF/EMF 图片（MathType/WPS Equation）存储，纯文本抽取拿不到，
+`Formula` 节点 `latex` 恒空。`modules.knowledge.formula_latex` 是可复用 building
+block（System 1 抽图/栅格化/归一 + System 2 视觉识别），fail-soft：
+
+```python
+from modules.knowledge.formula_latex import (
+    extract_docx_formula_images,   # System 1：docx OLE 公式预览图 → PNG + 上下文
+    recognize_formula_latex,       # System 2：公式 PNG → LaTeX（视觉 LLM）
+    enrich_formula_latex_attrs,    # System 1：识别 + coerce 成可写 {"latex": ...}
+)
+for fi in extract_docx_formula_images("讲义.docx"):
+    res = recognize_formula_latex(fi.png_bytes, context_text=fi.context_text)
+    if res.ok:
+        print(res.latex)   # 识别失败不编造，latex 留空待补（manifest fail-soft 约定）
+```
+
+**完整端到端 demo**：`examples/cookbook/k12-math/`（声明式激活 + 校本特化 +
+题库层 mock + 学习路径/TESTS 权重校验，含自带导数/概率/立体几何 3 份资料 +
+`mock_question_bank/`）。
 
 ```python
 # 阻塞式（返回 AgentV3Result，不是 RunResult）
@@ -1581,6 +1678,106 @@ def test_my_journey_real_llm(real_llm_available):
 | 把 KROW_API_KEY 透传给第三方 API | 凭证泄漏风险 | 只在 SDK <-> Krow Cloud 链路上用 |
 | 把用户业务数据 log 到 stdout | 可能被 ELK 截到 | 脱敏 / log 前过滤 |
 | 把 Plugin 内部 stack trace 全文返回给 agent | LLM 可能在用户输出里复述 | 错误黄金模板内只露用户能修的 hint |
+
+---
+
+## §9 双环元认知与运行时自进化
+
+> **这一章是给想观测 / 维护 agent "自进化"行为的开发者**。绝大多数场景你**什么都不用做**——双环元认知随 runtime 内置、默认全开、自我调节。本章解释它在做什么、产物落在哪、怎么只读查看、需要时怎么 kill。
+
+### 9.1 双环模型（一图理解）
+
+Krow agent 在跑任务时同时运行两个认知回路：
+
+| 回路 | 时机 | 职责 | 形态 | 成本 |
+|---|---|---|---|---|
+| **快环（M1/M2）** | 任务执行**中**（每步） | 实时感知认知负荷（目标进度 / 预算燃烧 / 工具抖动），strained/overload 时往 prompt 注入**软提示**纠偏 | System 1 遥测（零 LLM）+ 软提示 | ~0 |
+| **慢环（M3/M4）** | 任务**结束后**（事件驱动 + 节流，进程内） | 把高频认知负荷 / 失败信号**睡眠期蒸馏**成 learned overlay 教训，按在线证据**晋级**，注入后续任务 prompt | System 1 聚类/晋级 + System 2 每簇最多 1 次 LLM 蒸馏 | 极低（预算封顶） |
+
+设计纪律：**语义交给 LLM、语法交给系统**。快环的负荷分级、慢环的聚类 / 晋级 / 防膨胀全是确定性 System 1；只有"把一簇信号蒸馏成一句教训"才用 1 次 LLM。
+
+### 9.2 快环：认知负荷软提示
+
+快环是纯 System 1 遥测：每步算 `budget_burn_ratio` / `progress_ratio` 等轴，分级
+`nominal / strained / overload`。只有 strained/overload 才往 prompt 注入一段简短软
+提示（如"预算已过半但目标进度偏低，考虑收敛范围 / 先交付核心"），**不**硬改 LLM 输出。
+这条软提示链解决「预算快烧光但目标还差得远」这类典型元认知场景。
+
+快环全程零额外 LLM 成本、对你的 plugin 完全透明。kill switch 见 §9.6。
+
+### 9.3 慢环：睡眠蒸馏 + overlay 两层存储
+
+慢环把"反复出现的认知负荷 / 失败模式"沉淀成可复用教训：
+
+1. **采集**：任务结束后按 `cluster_key` 聚类遥测信号。
+2. **蒸馏（睡眠期）**：高频簇（复现 ≥ 2）每簇**最多 1 次** LLM 蒸馏成一条教训文本，
+   写入 overlay 存储为 `candidate`（**collect-only，绝不直接注入**）。单轮蒸馏受预算
+   封顶（默认 ≤ 3 次 LLM 调用 / ≤ 30s），用户新任务到达立即让位。
+3. **晋级（在线证据门，纯统计零 LLM）**：`candidate` 复现 ≥ 3 → 升 `active`（开始注入
+   prompt）；`active` 教训若净负反馈（`negative - positive`）≥ 3 → 自动降级 `demoted`。
+4. **注入**：`active` 教训按 `disclosure_triggers` 命中才加载进后续任务 prompt（按需，
+   不是永久全量）。
+
+overlay 是**两层 JSON**（复刻 AGENTS.md「压缩核心 + 按需加载」）：
+
+| 层 | tier | 含义 | 硬上限 |
+|---|---|---|---|
+| Tier-0 `core` | `0` | 压缩核心原则，永久注入 | 12 条（超限 fail-loud） |
+| Tier-1 `overlay` | `1` | 场景化，命中 triggers 才加载 | 总量 200 条；30 天未命中的 candidate 自动衰减 |
+
+`lesson_type` 两类：`info_only`（只读提示，零行为风险，默认放开晋级）与
+`behavior_change`（改变执行行为，软启动低权重 0.3、正反馈累积加权封顶 0.7，长期在线
+正向 + 观测量 ≥ 10 + active ≥ 7 天 + 支持率 ≥ 0.8 才升全权重 1.0）。
+
+### 9.4 只读查看蒸馏结果（`get_overlay_snapshot`）
+
+SDK 暴露只读 diagnostics API 审视慢环产物：
+
+```python
+import json
+from krow_agent_sdk.diagnostics import get_overlay_snapshot
+
+snap = get_overlay_snapshot()   # 也可传 store_path="/path/to/overlay.json"
+print(f"共 {snap['count']} 条 · {snap['by_status']} · 落盘={snap['store_path']}")
+for lesson in snap["lessons"]:
+    print(f"[{lesson['status']}/{'core' if lesson['tier']==0 else 'overlay'}]"
+          f" recur={lesson['recurrence']} +{lesson['positive_outcomes']}"
+          f"/-{lesson['negative_outcomes']} :: {lesson['text']}")
+```
+
+返回字段（plain dict，read-only，不抛异常 → 失败返 `{"error": ...}`）：
+
+| 字段 | 含义 |
+|---|---|
+| `store_path` / `exists` | overlay.json 落盘位置 / 是否存在 |
+| `count` / `by_status` / `by_tier` | 总数 / 按 candidate·active·demoted / 按 tier 0·1 计数 |
+| `lessons[]` | 每条教训：`id` / `text` / `tier` / `status` / `lesson_type` / `recurrence` / `positive_outcomes` / `negative_outcomes` / `weight` / `disclosure_triggers` / `cluster_key` / `scope` / `created_ts` / `updated_ts` |
+
+落盘位置默认 `{KROW_DATA_DIR}/self_evolution/overlay.json`（容器部署务必把 `KROW_DATA_DIR`
+挂到持久卷，否则蒸馏结果随容器销毁；详 [`headless-deployment.md`](./headless-deployment.md)）。
+
+### 9.5 维护（纠错 / 固化）
+
+- **只读审视**：用上面的 `get_overlay_snapshot()`。
+- **人工纠错**：overlay 是 candidate 起步 + 在线证据自动晋级/降级，**坏教训会因净负反馈
+  自动 demote**，通常无需手动干预。桌面 Krow IDE 的「记忆面板」提供 pin / 删除 UI；纯 SDK
+  场景可直接编辑 overlay.json（进程未跑时）或删文件重置。
+- **固化为 base**（高级 / 谨慎）：长期稳定的 active 教训可经人工门提案固化进 base，属于
+  内部维护流程，不在 SDK 用户日常范围。
+
+### 9.6 何时 kill / 调参
+
+默认全开即可。需要确定性复现（如录制 replay 测试）或排查时，可用环境变量逐环关闭
+（详 [`api-reference.md`](./api-reference.md) §13「双环元认知 / 运行时自进化 kill switch」）：
+
+| 目的 | 设置 |
+|---|---|
+| 关快环软提示 | `KROW_METACOG_PROVIDER=0`（+ `KROW_GOAL_GAP_FEEDER=0`） |
+| 关慢环蒸馏 | `KROW_SLEEP_PHASE=0` |
+| 关 overlay 注入（蒸馏仍跑但不进 prompt） | `KROW_OVERLAY_INJECT=0` |
+| 完全确定性（测试场景） | 上述全设 `0` |
+
+> 实战 cookbook：[`examples/cookbook/reasoning-analyst/`](../../packages/krow-agent-sdk/examples/cookbook/reasoning-analyst/) 演示如何订阅 `cognitive.load` 事件观测快环，并用 `get_overlay_snapshot` 查看慢环蒸馏。
 
 ---
 
