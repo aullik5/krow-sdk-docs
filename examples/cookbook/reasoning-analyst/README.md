@@ -44,7 +44,18 @@ python main.py hypothesis_test --question "呼吸困难更可能心源性还是�
 
 # 一次跑两个 journey（evidence_chain + hypothesis_test）
 python main.py --all
+
+# 进阶：覆盖模型 / 预算 / endpoint（默认无需指定）
+python main.py --chat-model qwen3.6-plus --reasoning-model qwen3.6-plus \
+  --budget-llm-calls 40 --budget-walltime 600 \
+  --base-url https://api.krow.cn   # staging / 私有部署才需要改
 ```
+
+可用 flag（`python main.py -h` 查全量）：`--question` 自定义问题、`--all` 跑两个
+journey、`--sources` 换资料、`--output-dir` / `--project-dir` 改落点、
+`--budget-llm-calls` / `--budget-walltime` / `--budget-replans` 调预算、
+`--chat-model` / `--reasoning-model` 覆盖模型、`--base-url` 改 cloud endpoint
+（亦可用 `KROW_BASE_URL` 环境变量，默认 `https://api.krow.cn`）。
 
 支持的策略（`SUPPORTED_STRATEGIES`）：`evidence_chain` / `hypothesis_test` /
 `comparative_analysis` / `temporal_trace`。全量推理策略见引擎
