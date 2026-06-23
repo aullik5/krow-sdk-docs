@@ -408,6 +408,79 @@ agent = (
 
 ---
 
+### §2.4.1 Persona 身份控制 + 多 Agent 轻量协同（A 层 + B 层 · v0.9.0.31+）
+
+面向「多 agent 分工」场景的两层能力：A 层给每个 agent 注入**最高优先级身份与行为准则**（类比 `AGENTS.md` / `CLAUDE.md`），B 层让组长 agent 把子任务**委派**给组员 agent。
+
+> 典型痛点：组长 agent 本应把活分给组员，却总是自己干。根因有二——(1) 默认 macro 基座身份是「任务规划与执行指挥官」，prompt 还含「必须包含至少一个执行步骤」等自执行指令；(2) 组长手上没有委派工具（能力缺失）。A 层解 (1)，B 层解 (2)，二者配合才彻底。
+
+#### `with_agent_identity(identity: str) -> AgentBuilder` （A 层）
+
+覆盖 macro 基座的默认身份描述（一句话角色定义）。注入到 system prompt 身份段。
+
+| 入参 | 说明 |
+|---|---|
+| `identity` | 非空字符串；空 / 纯空白 → `ValueError`（fail-loud）；超 `AGENT_IDENTITY_MAX_CHARS` 上限 → `ValueError` |
+
+#### `with_persona_directives(directives: str) -> AgentBuilder` （A 层）
+
+注入**全局最高优先级行为准则**（可多段）。物理位置：紧跟安全红线之后的 `CRITICAL` 段（primacy 效应），并在 prompt 末尾追加一条「冲突时以行为准则为准」的提醒（recency 效应）——利用 LLM 注意力 U 型曲线双重强化。当身份要求（如「只分配不执行」）与默认规则（如「必须有执行步骤」）冲突时，以本准则为准。
+
+| 入参 | 说明 |
+|---|---|
+| `directives` | 非空字符串；空 / 纯空白 → `ValueError`；超长 → `ValueError` |
+
+#### `with_team_member(name: str, member: Agent | Callable[[str], dict], *, description: str = "") -> AgentBuilder` （B 层）
+
+注册一个组员 agent。注册 ≥1 个后，`build()` **自动给组长注入 `delegate_to_member` 工具**（组长无需手写工具）。
+
+| 入参 | 说明 |
+|---|---|
+| `name` | 组员名称，组长用它寻址；同一组长内唯一。空 / 重复 → `ValueError` |
+| `member` | **SDK `Agent` 实例**（同进程委派，最常用）；或 **`Callable[[str], dict]` runner**（自定义传输，如子进程 / HTTP gateway，用于跨进程协同），入参子任务字符串、返回标准结果 dict（至少含 `summary` / `success`）。其他类型 → `ValueError` |
+| `description` | 组员能力简介，写进委派工具描述帮组长选人 |
+
+委派结果 dict 形状：`{"ok", "success", "summary", "output_files", "duration_seconds", "member"}`。
+
+> **并发约束**：同一 `Agent` 实例不可重入 / 并发 `run`（见 `Agent._run_lock`）。同进程委派**串行**执行（组员 run 期间组长阻塞），不同组员实例各自独立。**禁止**把组长自身注册成自己的组员（重入必炸）。
+> **边界**：本 API 覆盖**轻量**协同（少量组员、串行 / 自定义传输）。重量级分布式高并发多 agent 编排由 Krow Cloud 云端方案承载，不在 SDK 内实现。
+
+完整示例（组长 + 2 组员）：
+
+```python
+from krow_agent_sdk import AgentBuilder
+
+researcher = (
+    AgentBuilder().from_env()
+    .with_agent_identity("你是严谨的资料研究员，负责列要点、核查事实。")
+    .build()
+)
+writer = (
+    AgentBuilder().from_env()
+    .with_agent_identity("你是文案撰写员，负责把要点润色成通顺文字。")
+    .build()
+)
+
+leader = (
+    AgentBuilder().from_env()
+    .with_agent_identity("你是项目组长，负责拆解任务并分配给组员，不亲自执行。")
+    .with_persona_directives(
+        "收到任务后必须用 delegate_to_member 把子任务派给组员；"
+        "检索类派给 researcher，撰写类派给 writer；你只分配与汇总，不自己执行。"
+    )
+    .with_team_member("researcher", researcher, description="资料搜集与事实核查")
+    .with_team_member("writer", writer, description="把要点润色成通顺文字")
+    .build()
+)
+
+result = leader.run("准备一段关于太阳能两个优点的简短介绍。")
+print(result.final_output)
+```
+
+跨进程协同：把 `member` 传成自定义 runner（`Callable[[str], dict]`），在 runner 内通过 `subprocess` 或 HTTP gateway 调用另一进程的 member agent 即可。指南见 `advanced-development-guide.md` §11。
+
+---
+
 ### §2.5 Plugin 直接注入（6 stable + 3 experimental）
 
 | 方法 | 协议 | 稳定性 | 详见 |

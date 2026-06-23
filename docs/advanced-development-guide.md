@@ -1781,6 +1781,103 @@ for lesson in snap["lessons"]:
 
 ---
 
+## §11 多 Agent 轻量协同（A 层 persona + B 层 delegate · v0.9.0.31+）
+
+> 一篇指导：如何用 SDK 让多个 agent **分工协作**——给每个 agent 独立身份与行为准则，并让「组长」把子任务**派给**「组员」，而不是自己埋头干。
+
+### 11.1 要解决的问题
+
+实践中常见这样一幕：你想让一个组长 agent 把活分配给几个组员 agent，但组长**总是自己把活干了**。根因有两条，缺一不可同时治：
+
+| 根因 | 层 | 表现 | 解法 |
+|---|---|---|---|
+| **身份/纪律缺失** | 默认 macro 基座身份是「任务规划与执行指挥官」，prompt 还含「必须包含至少一个执行步骤」「不要无工具执行就下结论」等**自执行**指令 | 即使你口头说「你是组长」，模型仍按默认 prompt 自己执行 | **A 层**：`with_agent_identity` + `with_persona_directives` 注入最高优先级身份与准则，覆盖默认 |
+| **能力缺失** | 组长手上**没有委派工具** | 即使想委派，也无工具可调，只能用现有工具自己做 | **B 层**：`with_team_member` 自动注入 `delegate_to_member` 工具 |
+
+A 层让组长「想委派」，B 层让组长「能委派」。二者配合才彻底。
+
+### 11.2 A 层：身份与行为准则（最高优先级 prompt 注入）
+
+prompt 注入对 agent 的影响是**分等级**的——Krow 用 `PromptPriority`（`CRITICAL` / `HIGH` / `NORMAL` / `LOW` / `URGENT`）控制各段在最终 prompt 中的物理顺序，利用 LLM 注意力 U 型曲线（开头 primacy + 结尾 recency 最受重视）。
+
+- `with_agent_identity("一句话角色")`：覆盖默认身份段。
+- `with_persona_directives("多段行为准则")`：注入到**安全红线之后的 `CRITICAL` 段**（primacy），并在 prompt **末尾**追加「冲突时以行为准则为准」提醒（recency）。当你的身份要求（如「只分配不执行」）与默认规则（如「必须有执行步骤」）冲突时，以你的准则为准。
+
+二者均 **fail-loud**：传空 / 纯空白 / 超长 → `ValueError`（显式声明却给非法值不静默吞掉）。不调用时行为与旧版**逐字节一致**（零回退）。
+
+```python
+researcher = (
+    AgentBuilder().from_env()
+    .with_agent_identity("你是严谨的资料研究员，负责列要点、核查事实，不做润色。")
+    .build()
+)
+```
+
+### 11.3 B 层：委派工具与组员寻址
+
+`with_team_member(name, member, *, description="")` 注册组员；注册 ≥1 个后 `build()` 自动给组长注入 `delegate_to_member(member_name, task)` 工具。工具描述里会列出所有组员名 + 简介，帮组长选人。
+
+`member` 两种形态：
+
+1. **SDK `Agent` 实例**（同进程委派，最常用、最稳健）。委派 handler 调 `member.run(task)`。
+2. **`Callable[[str], dict]` runner**（自定义传输，用于**跨进程**协同）。runner 入参子任务字符串，返回标准结果 dict（至少含 `summary` / `success`）。
+
+委派结果统一规范化为：`{"ok", "success", "summary", "output_files", "duration_seconds", "member"}`。
+
+```python
+leader = (
+    AgentBuilder().from_env()
+    .with_agent_identity("你是项目组长，负责拆解任务并分配给组员，不亲自执行。")
+    .with_persona_directives(
+        "收到任务后必须用 delegate_to_member 把子任务派给组员；"
+        "检索类派给 researcher，撰写类派给 writer；你只分配与汇总。"
+    )
+    .with_team_member("researcher", researcher, description="资料搜集与事实核查")
+    .with_team_member("writer", writer, description="把要点润色成通顺文字")
+    .build()
+)
+result = leader.run("准备一段关于太阳能两个优点的简短介绍。")
+```
+
+### 11.4 跨进程协同（启动多个 agent 进程）
+
+把 `member` 传成自定义 runner，在 runner 内以子进程 / HTTP 调用另一进程的 member agent。子进程模式（稳健、无端口 / 鉴权负担）示意：
+
+```python
+import json, subprocess, sys
+
+def subprocess_member_runner(role: str, identity: str):
+    def _run(task: str) -> dict:
+        payload = json.dumps({"role": role, "identity": identity, "task": task})
+        proc = subprocess.run(
+            [sys.executable, "member_worker.py"],
+            input=payload, capture_output=True, text=True, timeout=300,
+        )
+        # member_worker.py 内 build 一个 member Agent 跑 task，把结果 JSON 打到 stdout
+        return json.loads(_extract_result_line(proc.stdout))
+    return _run
+
+leader = (
+    AgentBuilder().from_env()
+    .with_agent_identity("你是组长，只分配不执行。")
+    .with_persona_directives("必须用 delegate_to_member 把子任务派给组员。")
+    .with_team_member("researcher", subprocess_member_runner("researcher", "你是研究员"))
+    .with_team_member("writer", subprocess_member_runner("writer", "你是撰写员"))
+    .build()
+)
+```
+
+参考实现：仓库 `tests/sdk/_team_member_worker.py`（组员子进程入口）+ `tests/sdk/test_multi_agent_coordination_real_llm_e2e.py`（1 组长 + 2 组员子进程的真实 LLM 协同 E2E）。
+
+### 11.5 约束与边界（务必读）
+
+- **不可重入 / 不可并发**：同一 `Agent` 实例不能并发或重入 `run`（`Agent._run_lock`）。同进程委派**串行**执行（组员 run 期间组长阻塞）。不同组员实例彼此独立、可分别 run。
+- **禁止自委派**：不要把组长自己注册成自己的组员（重入必炸）。
+- **预算 / 超时**：组长一次 run 会触发组员的完整 run，叠加 `with_budget` / `with_tool_execution_timeout` 要给足额度。
+- **轻量边界**：本方案面向少量组员、串行 / 自定义传输的轻量场景。**重量级分布式高并发**多 agent 编排由 Krow Cloud 云端方案承载，不在 SDK 内实现。
+
+---
+
 ## 进一步阅读
 
 - [`quickstart.md`](./quickstart.md)：5 分钟入门 + 5 类 plugin 范例
