@@ -1349,10 +1349,10 @@ class ResearchHintPlugin:
 
 ### §5.4 `GatePlugin` — 加新 ConcludeGuard Gate (P4)
 
-**System 1**（Gate 是确定性判停规则）。让外部 plugin 加新 ConcludeGuard Gate，在 macro 或 micro ReACT 完成时自动判停。
+**System 1**（Gate 是确定性判停规则）。让外部 plugin 加新 ConcludeGuard Gate，在 macro conclude / micro 步骤内 / **macro 计划落盘前**（`phase="plan"`，v0.9.0.32+）自动判停。
 
 ```python
-GatePhase = Literal["macro", "micro"]
+GatePhase = Literal["macro", "micro", "plan"]
 
 @runtime_checkable
 class GatePlugin(Protocol):
@@ -1370,8 +1370,45 @@ class GatePlugin(Protocol):
 
 | `phase` 值 | 触发位面 |
 |---|---|
-| `"macro"` | macro ReACT 步骤 conclude 时 |
-| `"micro"` | micro ReACT 步骤内 |
+| `"macro"` | macro ReACT 步骤 **conclude** 时（任务收尾前最后一道闸） |
+| `"micro"` | micro ReACT 步骤内（单步工具执行内） |
+| `"plan"` | macro ReACT **计划落盘前**（`plan_task` / 修订计划提交 state 之前的 veto；见下「Plan-time veto」） |
+
+> **三相位严格隔离**：`plan` gate 只在计划提交前评估，绝不会在 conclude / micro 路径被误触发，反之亦然。
+
+#### Plan-time veto（`phase="plan"` · v0.9.0.32+ · ALLOW/BLOCK）
+
+> 场景：agent 在 macro ReACT 里**自规划**一些注定会被下游 `conclude` 阻断的步骤，先执行、再到收尾才被否决 → 白白浪费算力。`phase="plan"` gate 把审批前移到**计划落盘 state 之前**。
+
+- 触发时机：`plan_task` 构造出计划、内部守门全过、但**尚未提交 state**（覆盖**初始创建 + 修订**两条路径的公共落盘点）。
+- `GateVerdict.BLOCK` ⇒ 计划**不落盘、零步骤执行**，`plan_task` 直接把 `reason` 返回给 LLM；LLM 读到该 observation 后**自行重规划**（复用既有 replan 路径，无需额外接线）。
+- `GateVerdict.ALLOW`（或未注册 plan gate）⇒ 计划照常落盘执行（零回退）。
+- v1 仅 `ALLOW` / `BLOCK`；`REWRITE`（gate 直接改写计划）暂不支持。
+- 该相位下 `evaluate(parsed, context)` 收到的载荷：
+  - `parsed`：`{"action": "plan", "is_revision": bool, "goal": str, "steps": [{step_id, tool, purpose, constraints, depends_on}], "tools": [tool_name, ...]}`
+  - `context`：`{"phase": "plan", "is_revision": bool, "goal": str, "plan_steps": [...], "existing_completed_steps": [...], "act_name": str, "task_context": dict}`
+
+```python
+from krow_agent_sdk import GatePlugin
+from modules.knowledge.conclude_guard_gates import make_simple_gate, GateDecision, GateVerdict
+
+class NoRawWebFetchPlanGate:
+    """计划落盘前否决：禁止直接用 web_fetch，迫使 agent 改走受控检索。"""
+    plugin_id = "acme.plan_policy"
+    phase = "plan"
+
+    def get_gate(self):
+        def _evaluate(parsed, context):
+            if "web_fetch" in (parsed.get("tools") or []):
+                return GateDecision(
+                    verdict=GateVerdict.BLOCK,
+                    reason="❌ 计划被策略网关否决：本环境禁止 web_fetch，请改用 "
+                           "ai_search 重新规划。",
+                    gate_name="no_raw_web_fetch",
+                )
+            return GateDecision(verdict=GateVerdict.ALLOW, gate_name="no_raw_web_fetch")
+        return make_simple_gate("no_raw_web_fetch", 50, _evaluate)
+```
 
 #### 最小实现
 

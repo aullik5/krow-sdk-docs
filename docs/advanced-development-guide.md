@@ -967,7 +967,7 @@ agent = (
 | 名字 | 用途 |
 |---|---|
 | `GatePlugin` | Protocol —— plugin 入口签名（`plugin_id` / `phase` / `get_gate()`） |
-| `GatePhase` | Literal `"macro"` / `"micro"` —— gate 工作位面 |
+| `GatePhase` | Literal `"macro"` / `"micro"` / `"plan"` —— gate 工作位面（`"plan"` 自 v0.9.0.32 起，见 §5.2.1） |
 | `Gate` | Protocol —— gate 实例签名（`name` / `priority` / `evaluate(parsed, context)`） |
 | `GateDecision` | dataclass —— gate 返回值（`verdict` / `reason` / `gate_name`） |
 | `GateVerdict` | Enum —— `ALLOW` / `BLOCK` / `DEFER` 三态 |
@@ -986,7 +986,7 @@ class GatePlugin(Protocol):
     def plugin_id(self) -> str: ...   # 全局唯一 ID，<org>.<plugin_name>
 
     @property
-    def phase(self) -> GatePhase: ... # "macro" | "micro"
+    def phase(self) -> GatePhase: ... # "macro" | "micro" | "plan"
 
     def get_gate(self) -> Gate: ...   # 返回 Gate 实例（满足 Gate Protocol）
 ```
@@ -1068,6 +1068,88 @@ agent = (
 
 **完整端到端 demo**：见 cookbook `examples/cookbook/data-analyst/data_analyst_plugin.py:PIIDetectorGate`
 + `OutputPathGate` —— 同一 agent 注册 2 个 GatePlugin 演示合规审计场景。
+
+#### 5.2.1 Plan-time veto（`phase="plan"` · v0.9.0.32+ · 计划落盘前否决）
+
+> **要解决的问题**：上面的 `phase="macro"` gate 在 agent **conclude（收尾）时**才评估。
+> 但在某些托管环境（如 Krow Cloud 的 conversation slot）里，agent 跑 macro ReACT 时会
+> **自规划**一些注定会被下游 conclude gate 阻断的步骤——这些步骤会被**先执行**、直到
+> 收尾才被否决 → 白白浪费一整轮算力。`phase="plan"` 把审批**前移**到计划真正落盘执行
+> 之前，让你在 agent 动手前就否决一份坏计划。
+
+**触发时机**：`plan_task`（含修订）构造出计划、内部守门全过、但**尚未提交 state** 时。
+覆盖**初始创建 + 修订**两条路径的公共落盘点。
+
+**判决语义（v1 仅 ALLOW / BLOCK，REWRITE 暂缓）**：
+
+| 返回 | 行为 |
+|---|---|
+| `GateVerdict.BLOCK` | 计划**不落盘、零步骤执行**；`plan_task` 直接把 `reason` 返回给 LLM；LLM 读 observation 后**自行重规划**（复用既有 replan 路径，无新机制） |
+| `GateVerdict.ALLOW`（或未注册 plan gate） | 计划照常落盘执行（零回退） |
+
+**`evaluate(parsed, context)` 在 plan 相位收到的载荷**（与 macro/micro 不同）：
+
+```python
+parsed = {
+    "action": "plan",
+    "is_revision": bool,          # 是否为修订（replan）
+    "goal": str,
+    "steps": [{"step_id", "tool", "purpose", "constraints", "depends_on"}, ...],
+    "tools": [tool_name, ...],    # 计划用到的工具集合（便于做白/黑名单）
+}
+context = {
+    "phase": "plan",
+    "is_revision": bool,
+    "goal": str,
+    "plan_steps": [...],          # 同 parsed["steps"]
+    "existing_completed_steps": [...],  # 已完成步骤（修订时判断进度）
+    "act_name": str,
+    "task_context": dict,
+}
+```
+
+**完整示例：禁止计划里出现某工具，迫使 agent 重规划**
+
+```python
+from krow_agent_sdk.protocols import (
+    GateDecision, GateVerdict, make_simple_gate,
+)
+
+class BudgetAwarePlanGate:
+    """计划落盘前否决：步骤数 > 6 或用到 heavy_render → BLOCK，省掉无谓执行。"""
+    plugin_id = "acme.plan_budget"
+    phase = "plan"   # ← 关键：计划落盘前评估
+
+    def get_gate(self):
+        def evaluate(parsed: dict, context: dict) -> GateDecision:
+            steps = parsed.get("steps") or []
+            tools = parsed.get("tools") or []
+            if len(steps) > 6:
+                return GateDecision(
+                    verdict=GateVerdict.BLOCK,
+                    reason=(
+                        f"❌ 计划被预算网关否决：步骤数 {len(steps)} > 6。\n"
+                        "   修法：合并为不超过 6 步的精简计划后重新 plan_task。"
+                    ),
+                    gate_name="plan_budget",
+                )
+            if "heavy_render" in tools:
+                return GateDecision(
+                    verdict=GateVerdict.BLOCK,
+                    reason="❌ 本会话禁用 heavy_render，请改用 light_render 重新规划。",
+                    gate_name="plan_budget",
+                )
+            return GateDecision(verdict=GateVerdict.ALLOW, gate_name="plan_budget")
+        return make_simple_gate("plan_budget", 50, evaluate)
+```
+
+**注册方式与 macro/micro gate 完全一致**（`.with_gate_plugin(BudgetAwarePlanGate())`）；
+SDK build() 时按 `plugin.phase` 自动路由到 plan 相位注册表，与 macro/micro **严格隔离**
+（plan gate 绝不会在 conclude 触发，反之亦然）。
+
+> **边界**：plan gate 是 **fail-safe** 的——gate 评估抛异常会被静默吞掉（计划照常落盘），
+> 外部 plugin 的 bug 绝不炸穿 plan 主路径。若要"不可绕过"的硬约束，应同时在 macro
+> conclude gate 兜底（双层防护）。
 
 ### 5.3 EventListenerPlugin（审计 / metric）
 
