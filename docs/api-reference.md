@@ -481,6 +481,60 @@ print(result.final_output)
 
 ---
 
+### §2.4.2 对话槽硬锁 ACT + 工具宇宙裁剪（v0.9.0.33+）
+
+**解决的问题**：默认 SDK 把「用哪个 ACT」交给 macro LLM 决策——`task_context.act_name` 只是**软提示**（把该 ACT 的引导置顶 + 完整披露，但**不禁止**切换、**不裁**工具）。对话槽里的 `team_leader` agent 因此可能被语义选择器 / LLM 漂移到内置写作 ACT，导致它的派单工具（如 `tl.create_task`）不在 macro 工具视野里 → 组长既不能自办又找不到派单工具的**死路**。本特性提供**确定性硬锁**。
+
+#### `with_locked_act(act_name: str, *, tool_universe: str = "global") -> AgentBuilder`
+
+硬锁 agent 到指定 ACT：①**抑制其它 ACT** 的引导 / 菜单（macro LLM 看不到别的 ACT 作为可选项 → 杜绝漂移）；②**保证锁定 ACT 的工具在 macro 工具快照中可见**。
+
+| 入参 | 说明 |
+|---|---|
+| `act_name` | 要锁定的 ACT 名（内置如 `"pptx_studio"`，或 `ACTPlugin.act_name` 如 `"team_leader"`）。空 / 纯空白 → `ValueError` |
+| `tool_universe` | `"global"`（默认 · 仅锁 ACT + 保证工具可见，工具宇宙不裁）或 `"act_only"`（额外把 macro prompt 工具宇宙裁到「该 ACT 工具 + **内部工具**」）。非法值 → `ValueError` |
+
+**只裁 prompt，不动注册表**：`act_only` 仅裁剪发给 LLM 的工具快照；`ToolManager` 注册表保持全量 → `lookup_tool_docs` 逃生口仍在，且内部工具（`llm_generate` / `run_step` / `native.*` / `editor.*` / `knowledge.*` / `kg_*` / `kb_*` / `krow_*` / `lookup_tool_docs` / `deep_reflect`）**永远保留**，绝不被裁。解析不到该 ACT 的工具集时**自动回退为不裁**（宁可多给工具，不误删派单工具）。
+
+每次 `run` 默认注入 `act_name` / `lock_act=true` / `tool_universe`；**per-run `task_context` 同名键优先**（可临时解锁 / 改宇宙）。
+
+#### 等价的 per-request `task_context` 键（Krow Cloud / 非 Python 集成）
+
+不经 Python builder 时，直接在 `run(task_context=...)`（或服务端请求）里传：
+
+| 键 | 类型 | 默认 | 语义 |
+|---|---|---|---|
+| `act_name` | str | — | 要锁定 / 提权的 ACT 名 |
+| `lock_act` | bool | `false` | `true` = 硬锁 `act_name` + 抑制其它 ACT 引导/菜单 |
+| `tool_universe` | `"act_only"` \| `"global"` | `"global"` | `act_only` = 裁 macro prompt 工具宇宙到「该 ACT 工具 + 内部工具」 |
+
+**fail-loud 校验**（仅校验这三个新键，不波及其它 `task_context` 键）：`lock_act` 非 bool、`tool_universe` 取值非法、`lock_act=true` 缺 `act_name`、`tool_universe="act_only"` 未配 `lock_act=true` → 抛 `ACTLockValidationError`（`ValueError` 子类）。缺省零回退、任务槽（`act="self"`）零影响。
+
+```python
+from krow_agent_sdk import AgentBuilder
+
+leader = (
+    AgentBuilder().from_env()
+    .with_act_plugin(team_leader_act_plugin)     # 声明 team_leader ACT + tl.create_task
+    .with_tool_plugin(dispatch_tool_plugin)      # 注册 tl.create_task
+    .with_locked_act("team_leader", tool_universe="act_only")
+    .with_agent_identity("你是项目组组长，只拆解 + 派单，绝不亲自撰写正文。")
+    .with_persona_directives("必须用 tl.create_task 派单；禁止用写作/文件工具自办。")
+    .build()
+)
+result = leader.run("产出一份市场调研简报，拆解后派给团队成员。")
+```
+
+等价 per-run 写法（临时锁定单轮）：
+
+```python
+agent.run(task, task_context={"act_name": "team_leader", "lock_act": True, "tool_universe": "act_only"})
+```
+
+> 何时用 `with_locked_act` vs `act_name`？需要**确定性**禁止漂移（对话槽固定角色 agent）→ `with_locked_act`。只想**优先**某 ACT 但仍允许 LLM 跨域兜底 → 只传 `act_name`（软提示）。
+
+---
+
 ### §2.5 Plugin 直接注入（6 stable + 3 experimental）
 
 | 方法 | 协议 | 稳定性 | 详见 |
@@ -747,7 +801,7 @@ def run(
 | `project_id` | 项目 ID；与 KrowService 跨进程协作时使用 |
 | `stop_event` | `threading.Event` 实例；外部 `set()` 后 agent 协作停止（不立即；详 `agent_v3.py` stop_event 协议） |
 | `inbound_messages` | 上文消息序列 `[{"role": "user", "content": ...}]`（兼容 OpenAI chat 格式） |
-| `task_context` | 任务级配置（如 ACT 强制选择、tool whitelist、`micro_budget`、`max_coverage_rounds`） |
+| `task_context` | 任务级配置：`act_name`（软提示，提权某 ACT）、`lock_act` + `tool_universe`（硬锁 ACT + 裁工具宇宙，见 §2.4.2）、`agent_identity` / `persona_directives`（见 §2.4.1）、`micro_budget`、`max_coverage_rounds` 等 |
 
 > **`task_context['max_coverage_rounds']`**（int，0-10，默认 2）：长文报告"覆盖度驱动续写"的最大轮数。
 > 当结构化多章节报告（≥3000 字 + ≥3 标题）字符达标但 LLM 自检判定仍有用户子问题未覆盖时，系统会定向补全缺失章节，最多续写本轮数。

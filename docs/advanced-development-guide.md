@@ -1960,6 +1960,62 @@ leader = (
 
 ---
 
+## §12 对话槽硬锁 ACT + 工具宇宙裁剪（v0.9.0.33+）
+
+### 12.1 为什么需要硬锁
+
+默认 SDK 把「用哪个 ACT」当作**语义决策**交给 macro LLM：`task_context.act_name` 只是**软提示**——把该 ACT 的 `planner_hint` 置顶 + 完整披露，但**不禁止**切换、**不裁**工具宇宙（macro 工具快照默认是全局注册表，避免废掉文件 / 文档 / 搜索等跨域基础能力）。
+
+这在「对话槽固定角色 agent」场景会出事：一个 `team_leader` agent 只该做「拆解 + 派单」，它的派单工具是自定义 ACT 工具 `tl.create_task`。但语义选择器 / LLM 可能漂移到内置写作 ACT 的工作流，于是组长**既被纪律禁止自办、又在当前工作流里找不到派单工具** → 死路。根因不是工具被物理删除（它仍在全局注册表），而是 LLM 被错误的 ACT 引导带偏。
+
+### 12.2 两个确定性开关
+
+`with_locked_act(act_name, *, tool_universe="global")`（或等价 per-run `task_context` 键 `lock_act` / `tool_universe`）：
+
+1. **`lock_act=true`（锁 ACT 选择）**：强制 pin 到 `act_name`，并**抑制其它 ACT** 的引导与菜单（macro LLM 看不到别的 ACT 作为可选项）——从根上消除漂移。这一步通常已足够修复「找不到派单工具」：抑制写作 ACT 引导后，LLM 只会按 team_leader 工作流走，而 `tl.create_task` 本就在全局快照里可见。
+2. **`tool_universe="act_only"`（裁工具宇宙 · 额外硬化）**：把发给 LLM 的 macro 工具快照裁到「该 ACT 工具 + 内部工具」。**只裁 prompt 快照，不动 `ToolManager` 注册表**——`lookup_tool_docs` 逃生口仍在；`plan_task` 白名单校验仍读全量注册表，不会因裁剪误杀。
+
+### 12.3 三条不可破的红线（实现保证）
+
+- **内部工具永不裁**：`llm_generate` / `run_step` / `native.*` / `editor.*` / `knowledge.*` / `kg_*` / `kb_*` / `krow_*` / `lookup_tool_docs` / `deep_reflect` 在 `act_only` 下始终保留（否则 agent 连基本规划 / 生成都做不了）。
+- **解析不到就不裁**：若解析不到锁定 ACT 的工具集（未知 ACT），自动回退为不裁（宁可多给工具，绝不误删 `tl.create_task` 这类派单工具）。
+- **缺省零回退 + 任务槽零影响**：不传这三个键 → 行为逐字不变；普通任务槽（`act="self"`）完全不受影响。
+
+### 12.4 fail-loud 校验（指定≠采用）
+
+只校验这三个新键，不波及其它 `task_context` 键。以下情况抛 `ACTLockValidationError`（`ValueError` 子类）：`lock_act` 非 bool；`tool_universe` 取值非法；`lock_act=true` 缺 `act_name`；`tool_universe="act_only"` 未配 `lock_act=true`（裁工具却不锁 ACT 会与裁后的工具宇宙不一致）。这是 AGENTS.md「指定≠采用」反模式的落地——显式声明的契约不可满足时必须在系统可见处 fail-loud，禁止 silent no-op。
+
+### 12.5 完整示例
+
+```python
+from krow_agent_sdk import AgentBuilder
+
+leader = (
+    AgentBuilder().from_env()
+    .with_act_plugin(team_leader_act_plugin)   # 声明 team_leader ACT，get_tool_names()=["tl.create_task"]
+    .with_tool_plugin(dispatch_tool_plugin)    # 注册 tl.create_task
+    .with_locked_act("team_leader", tool_universe="act_only")
+    .with_agent_identity("你是项目组组长，只拆解 + 派单，绝不亲自撰写正文。")
+    .with_persona_directives(
+        "## 组长纪律（最高优先级）\n"
+        "- 必须用 `tl.create_task` 把每个子任务派给团队成员。\n"
+        "- 禁止用写作 / 文件工具自己完成正文。"
+    )
+    .build()
+)
+result = leader.run("产出一份市场调研简报，拆解后逐个派给团队成员。")
+```
+
+参考实现：`tests/sdk/test_conversation_act_lock_real_llm_e2e.py`（锁 team_leader 后直接 `tl.create_task` 派单、不漂移到写作 ACT 的真实 LLM E2E）+ `tests/sdk/test_sdk_conversation_act_lock.py`（校验 / 抑制 / 裁剪 / 零回退单测）。
+
+### 12.6 与 `act_name`（软提示）/ persona 的分工
+
+- 需要**确定性**禁止漂移（对话槽固定角色）→ `with_locked_act`。
+- 只想**优先**某 ACT 但仍允许 LLM 跨域兜底 → 只传 `task_context.act_name`（软提示）。
+- 锁 ACT 解决「用哪个工作流 + 哪些工具」；persona（§2.4.1 `with_agent_identity` / `with_persona_directives`）解决「你是谁 + 行为纪律」。对话槽组长通常**三者合用**：锁 team_leader + 组长身份 + 「只派单不自办」纪律。
+
+---
+
 ## 进一步阅读
 
 - [`quickstart.md`](./quickstart.md)：5 分钟入门 + 5 类 plugin 范例
