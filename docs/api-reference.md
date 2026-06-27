@@ -1046,6 +1046,7 @@ if result.suspended:
 | `result.suspension["expected_input"]` | `free_text` / `approval` / `selection` / `file` |
 | `result.suspension["options"]` | 可选项列表（selection 场景） |
 | `result.suspension["origin"]` | `llm_tool`（LLM 自主发问）/ `policy_gate`（强制确认门） |
+| `result.suspension["metadata"]` | `dict` — 透传的自定义 domain payload（默认 `{}`）。框架**不解释**其内容，原样回传。来源：`llm_tool` 经 `request_human_input(metadata={...})`；`policy_gate` 经 ACT `__act__.yaml` 的 `hitl_gate_metadata: {tool: {...}}` 声明。典型用途：选面 / 确认 UI 渲染所需的 domain 字段（如 `colored_step_key`、候选几何）。 |
 | `result.suspension["expires_at"]` | checkpoint 过期时间（过期 resume → `CheckpointExpiredError`） |
 
 #### 流式 / headless
@@ -1099,6 +1100,45 @@ result = agent.run("生成日报", task_context={"hitl": {"enabled": False}})
 > **稳定性**：本 per-run 覆盖契约为 **Stable**——`setdefault('hitl', ...)`（调用方优先）
 > 语义受版本治理保护，breaking 变更须 MAJOR bump + 提前 1 release deprecation 警告
 > （与 `with_hitl` 同级）。守门测试见 §3.5 对应 contract test。
+
+#### ACT 声明式 HITL 粒度（per-ACT · `__act__.yaml`）
+
+`allow_llm_questions` / `confirm_before_tools` 是 **run 级**开关；若需**按管线（ACT）**
+细化 HITL 行为，ACT 作者可在 `__act__.yaml` 声明以下可选字段（ACT 激活时生效，调用方零改动 · OCP）：
+
+| manifest 字段 | 类型 | 语义 |
+|---|---|---|
+| `hitl_allow_llm_questions` | `bool` | 覆盖全局 `allow_llm_questions`：该 ACT 拥有的工具所属 step 是否注入 `request_human_input`。典型：无人值守离线建库 ACT 声明 `false`，避免批处理场景过度发问→静默挂起。**按 `step.tool → 所属 ACT` 解析**（非 step-index）。 |
+| `hitl_confirm_before_tools` | `list[str]` | 声明式强制确认门：执行这些工具前由 System-1 `_maybe_raise_hitl_gate` 必停（与 run 级 `confirm_before_tools` 取并集）。ACT 作者最清楚本管线高代价节点。 |
+| `hitl_gate_metadata` | `dict[str, dict]` | `{tool_name: {...}}`——该工具触发确认门时，对应 payload 原样进 `suspension["metadata"]` 透传给前端（如选面 UI 渲染字段）。框架不解释内容。 |
+
+> **粒度说明（接 kad 反馈 S2）**：HITL 发问门粒度为 **run 级 + per-ACT**，**无 per-step-index**。
+> 若需「同一管线内 step A 允许发问、step B 禁止」，推荐做法是**把这两个 step 的工具拆到不同 ACT**，
+> 或对禁止发问的 step 走 `hitl_allow_llm_questions=false`、对需要用户介入的 step 改用**声明式
+> `hitl_confirm_before_tools` 强制确认门**（携带 `hitl_gate_metadata` 渲染自定义 UI）——而非依赖
+> LLM「自觉在某 step 不发问」（文字引导对 LLM 不可靠）。
+
+#### resume 状态存活契约（接 kad 反馈 S3）
+
+HITL 挂起→resume 跨越的状态由 `ProgressiveExecutor.export_hitl_snapshot` / `restore_hitl_snapshot`
+显式白名单捕获/恢复。**跨 resume 存活**的状态：
+
+| 状态 | 跨 resume 存活 | 说明 |
+|---|---|---|
+| `step_results`（已完成步骤结果） | ✅ | 按 step_id 序列化进 checkpoint |
+| `output_files`（已追踪产物清单） | ✅ | 含**远端/跨机产物**（标记 `remote: true`，见下）；不再因本地不存在而丢 |
+| 预算（llm_calls / replans / elapsed） | ✅ | 挂起等待时长不计入墙钟 |
+| `react_tools_called` / `pptx_ctx` | ✅ | |
+| SearchSession 笔记 / planner 反馈累积 / 诊断缓存 | ❌（按需重建） | 纯优化层，不影响续跑正确性 |
+
+**跨机产物追踪（2part 部署）**：当工具在远端机（如 Win 引擎机）产出文件、返回**远端绝对路径**
+（`C:\...\x.fem`）时，`output_files` 条目带 `remote: true` 标记，且**不**做本地 `os.path.exists`
+校验（POSIX host 上本地必不存在）。接入方据此知道该产物在远端、不应按本地文件读取/校验。
+
+**mid-step 续跑工具幂等**：HITL 在 step 执行中途挂起、resume 后该 step 被重入时，挂起前**已成功
+执行的重型工具**（同输入）由 System-1 持久幂等闸门跳过（不重跑），发 `hitl.idempotent_skip` 事件
+（payload 含 `reused: true`）；同时该 step 的 `progressive.step_start` 带 `idempotent_replay: true`，
+供接入方前端把「续跑重放」与「真执行」区分，避免渲染误导用户的「进行中」步骤条。
 
 ---
 
@@ -1896,10 +1936,11 @@ for item in agent.run_stream("..."):
 | 任务生命周期 | `agent.task_cancelled` | `reason` |
 | Macro ReACT | `macro_react.plan_created` | `todos` (list) |
 | Macro ReACT | `macro_react.todo_updated` | `todo_id` / `status` |
-| 进度 | `progressive.step_start` | `step_index` / `step_kind` / `tool_name` |
-| 进度 | `progressive.step_completed` | `step_index` / `summary` / `success` |
+| 进度 | `progressive.step_start` | `step_id` / `tool` / `purpose` / `idempotent_replay`(bool) |
+| 进度 | `progressive.step_completed` | `step_id` / `summary` / `success` |
 | 进度 | `progressive.replan_start` | `reason` / `attempt` |
 | 进度 | `progressive.early_conclude` | `step_index` / `gate_name` / `reason` |
+| HITL | `hitl.idempotent_skip` | `step_id` / `tool` / `reused`(bool) / `idempotent_reuse`(bool) |
 | Planner | `planner.phase2_start` | `act_name` |
 | Planner | `planner.phase2_end` | `act_name` / `tools_selected` |
 | Micro ReACT | `react.step` | `iteration` / `tool_name` / `tool_args` |
