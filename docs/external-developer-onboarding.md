@@ -28,7 +28,9 @@
 ```bash
 pip install krow-agent-sdk krow-sdk-install
 # 或带 extras：
-pip install "krow-agent-sdk[office,visual,knowledge,remote]"
+pip install "krow-agent-sdk[office,visual,reasoning,remote]"
+# 推理洞察管线全能力（因果发现/估计/反事实 + 贝叶斯网概率推理）：
+pip install "krow-agent-sdk[reasoning]"
 # 全装：
 pip install "krow-agent-sdk[all]"
 ```

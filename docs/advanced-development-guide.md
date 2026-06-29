@@ -1382,6 +1382,35 @@ for item in agent.run_stream(user_input):
         raise item.error  # 后台异常
 ```
 
+#### 6.1.3 激活完整 reasoning 管线（纯推理任务 · 与桌面同源）
+
+`task_context={"strategy": ...}` 只是**选**一条推理策略；要让纯推理任务拿到**与桌面"推理工作台"
+逐字一致的完整编排**（多步假设/证据/矩阵/反驳的 per-strategy 编排 preamble + per-strategy Gate），
+再加一个 `"source": "reasoning_panel"`：
+
+```python
+# 纯推理任务（如竞争假设 ACH / 因果发现）→ 原生激活完整 reasoning 运行时
+result = agent.run(
+    "对『X 是否是 Y 的主因』做竞争假设(ACH)分析：提≥2 个假设、从证据抽取并标来源、"
+    "建证据×假设矩阵、按反驳最少诊断",
+    task_context={"source": "reasoning_panel", "strategy": "hypothesis_test"},
+)
+```
+
+- **`strategy` 取值**：内置 reasoning 策略 id（如 `hypothesis_test` / `causal_discovery` /
+  `evidence_chain` / `comparative_analysis` / `temporal_trace` / `bayes_inference` /
+  `graph_analytics` / `deductive_proof`）。编排步骤是**代码级 SSOT**（runtime 内置），桌面升级
+  时随 runtime wheel 自动跟随——你**无需在 worker 里手抄管线步骤**（手抄 = 多 SSOT 漂移反模式）。
+- **触发粒度建议（worker 作者）**：只对**纯推理** capability 挂 `source: reasoning_panel`；写作/
+  检索/读取等**混合任务**不要挂（会把常规执行流换成推理流，反而绕路）。判定"是不是纯推理任务"放在
+  你的 capability 路由里，混合时降级为普通 `agent.run(...)`。
+- **定量策略依赖**：`causal_discovery` 等定量因果/概率策略的统计估计/反驳需 opt-in
+  `pip install krow-agent-sdk[reasoning]`（scipy/dowhy/causal-learn/pgmpy）；缺库时引擎 fail-loud
+  降级定性路径，不静默出错。
+- **act_only 锁 worker**：单 forced-ACT 的 worker（如领域 specialist pod）**不能切换** ACT，但
+  `source: reasoning_panel` 与 `act_name` 锁不冲突——它只改任务上下文的推理分支，ACT 仍锁定。
+  实战参考 cookbook：[`examples/cookbook/reasoning-analyst/`](../../packages/krow-agent-sdk/examples/cookbook/reasoning-analyst/)。
+
 ### 6.2 LLM helper（在 LLM-driven Tool 中按需用，注意 §1.4 反模式 C）
 
 ```python

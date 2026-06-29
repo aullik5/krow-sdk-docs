@@ -27,15 +27,32 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# 本 cookbook 演示的策略子集（推理策略 SSOT 在引擎
+# 本 cookbook 演示的策略集（推理策略 SSOT 在引擎
 # ``modules.knowledge.reasoning_strategies.STRATEGIES``）。
-# 这里只列「不依赖 CSV 定量统计依赖（DoWhy/causal-learn）即可跑」的常用策略，
-# 让外部开发者装 ``krow-agent-sdk[ontology]`` 默认就能跑通。
+#
+# 2026-06-29：补齐**因果发现**
+# + **概率推理**，让 cookbook 覆盖推理洞察管线的全部范式（此前只演示 4 个定性策略）。
+#
+# 依赖分层：
+#   - 定性策略（前 4 个）：装 ``krow-agent-sdk[ontology]`` 即可跑（networkx 等轻量）。
+#   - causal_discovery：定性路径（LLM 提因果边 + domain_prior 定性反驳，无数据集）装
+#     ``[ontology]`` 即可；**定量路径**（ingest_dataset + 统计因果发现/估计）需
+#     ``krow-agent-sdk[reasoning]``（dowhy/causal-learn）。
+#   - bayes_inference：贝叶斯网推断需 ``krow-agent-sdk[reasoning]``（pgmpy）。
+# 缺重型库时引擎 fail-loud 指引降级到定性路径（不会静默出错）。
 SUPPORTED_STRATEGIES: tuple[str, ...] = (
     "evidence_chain",        # 链式证据逐级抬升后验（单论断核实）
     "hypothesis_test",       # ACH 竞争假设排除分析
     "comparative_analysis",  # 多对象横向对比
     "temporal_trace",        # 时间线追踪
+    "causal_discovery",      # 因果发现六阶段科研闭环（定性可跑 / 定量需 [reasoning]）
+    "bayes_inference",       # 贝叶斯网概率推理（需 [reasoning] 的 pgmpy）
+)
+
+# 需 ``krow-agent-sdk[reasoning]`` 重型依赖才能发挥**完整定量能力**的策略（仅用于
+# UX 提示；缺依赖时引擎仍会 fail-loud 降级到定性路径，不阻塞）。
+REASONING_EXTRA_STRATEGIES: frozenset[str] = frozenset(
+    {"causal_discovery", "bayes_inference"}
 )
 
 # reasoning 管线由 task_context.source == "reasoning_panel" 驱动；reasoning_pipeline

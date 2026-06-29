@@ -1,0 +1,34 @@
+# reasoning-analyst Tier 2 预期结果卡（causal_discovery 因果发现 journey）
+#
+# 2026-06-29 缺口B：补齐因果发现策略的真机 E2E 覆盖（此前 cookbook 只演示定性策略，
+# 用户真实场景——肺癌科研 causal_discovery——无 cookbook 覆盖）。
+#
+# 多维断言（System 1 · 零 LLM 二级判官）；详 _journey_e2e_helpers.assert_journey。
+# 设计取舍：因果结论文本结构由 LLM 自由发挥，故只断言产物存在 + 结构化 json 含关键
+# 字段 + 最小字节；"是否真建了因果图 / 真调了因果工具"由测试自定义断言负责。
+
+exit_code: 0
+
+# walltime：causal_discovery 是六阶段科研闭环（引擎 budget max_wallclock 3600s），
+# 远比定性策略重；给足余量避免 SLA 伪阳性（lessons "并行 walltime 硬阈"反模式）。
+max_walltime_s_serial: 2400
+max_walltime_s_parallel: 3000
+
+required_artifacts:
+  - reasoning_causal_discovery.md
+  - reasoning_causal_discovery.json
+  - summary.json
+
+min_artifact_bytes:
+  reasoning_causal_discovery.md: 200
+  reasoning_causal_discovery.json: 200
+  summary.json: 80
+
+required_keywords_in:
+  reasoning_causal_discovery.json:
+    - reasoning_completed
+    - final_output
+    - strategy
+  summary.json:
+    - n_completed
+    - reasoning_completed

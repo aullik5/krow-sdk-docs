@@ -43,6 +43,7 @@ pip install "krow-agent-sdk[office]"       # +24 项 docx/pptx/excel/pdf
 pip install "krow-agent-sdk[visual]"       # +4 项 cairosvg/cairocffi（PPTX 视觉质检，需系统库 libcairo2 + libpango，详 §4.5.1）
 pip install "krow-agent-sdk[ontology]"     # +4 项 networkx/jieba/python-louvain/beautifulsoup4 (新 ontology 管线: wiki + graph + extractive)
 # pip install "krow-agent-sdk[knowledge]"  # DEPRECATED alias → [ontology], 0.10 移除
+pip install "krow-agent-sdk[reasoning]"    # ontology + dowhy/causal-learn/pgmpy/scipy (推理洞察管线全能力: 因果发现/估计/反事实 + 贝叶斯网概率推理)
 pip install "krow-agent-sdk[remote]"       # +8 项 fastapi/uvicorn/websockets
 pip install "krow-agent-sdk[all]"          # 一站式全装
 ```

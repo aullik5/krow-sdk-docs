@@ -1,8 +1,10 @@
 # Reasoning Analyst · SDK Cookbook
 
 纯 SDK（无 UI）启动 Krow 引擎的**推理洞察管线**：把一份资料 + 一个分析问题，交给
-链式证据核验（`evidence_chain`）/ 竞争假设排除（`hypothesis_test`）等策略，输出
-**带证据落点的结论**，并自助落盘成 markdown + json。
+链式证据核验（`evidence_chain`）/ 竞争假设排除（`hypothesis_test`）/ **因果发现**
+（`causal_discovery`）/ **概率推理**（`bayes_inference`）等策略，输出**带证据落点的
+结论**，并自助落盘成 markdown + json。覆盖推理洞察管线的全部范式（UI 除外，与桌面
+推理工作台等价）。
 
 > 这是面向 **SDK 开发者** 的范例：演示如何在没有桌面推理工作台 UI 的情况下，直接
 > 用 `agent.run(...)` 把问题路由进 reasoning 管线，并正确判定"推理是否真的完成"。
@@ -29,9 +31,18 @@
 export KROW_API_KEY=sk-user-xxx      # PowerShell: $env:KROW_API_KEY='sk-user-xxx'
 # 2. 安装 runtime
 krow-sdk-install --api-key $KROW_API_KEY
-# 3. 装本 cookbook
+# 3. 装 reasoning 依赖（因果发现 / 概率推理的定量能力需要）
+pip install "krow-agent-sdk[reasoning]"   # dowhy / causal-learn / pgmpy + ontology 轻量栈
+# 4. 装本 cookbook
 cd examples/cookbook/reasoning-analyst && pip install -e .
 ```
+
+> **依赖分层**：只跑定性策略（`evidence_chain` / `hypothesis_test` /
+> `comparative_analysis` / `temporal_trace`）装 `krow-agent-sdk[ontology]` 即可。
+> `causal_discovery` 的**定性路径**（LLM 提因果边 + 定性反驳，无数据集）也只需
+> `[ontology]`；其**定量路径**（统计因果发现/估计）和 `bayes_inference`（贝叶斯网
+> 推断）需 `krow-agent-sdk[reasoning]`（含 dowhy / causal-learn / pgmpy）。缺重型库时
+> 引擎会 fail-loud 指引降级到定性路径，不会静默出错。
 
 ## 跑法
 
@@ -41,6 +52,12 @@ python main.py
 
 # 指定策略 + 自定义问题
 python main.py hypothesis_test --question "呼吸困难更可能心源性还是肺源性？"
+
+# 因果发现六阶段科研闭环（定性可跑；定量需 [reasoning]）
+python main.py causal_discovery
+
+# 贝叶斯网概率推理（需 [reasoning] 的 pgmpy）
+python main.py bayes_inference --question "量化心源性 vs 肺源性呼吸困难的后验概率"
 
 # 一次跑两个 journey（evidence_chain + hypothesis_test）
 python main.py --all
@@ -57,10 +74,19 @@ journey、`--sources` 换资料、`--output-dir` / `--project-dir` 改落点、
 `--chat-model` / `--reasoning-model` 覆盖模型、`--base-url` 改 cloud endpoint
 （亦可用 `KROW_BASE_URL` 环境变量，默认 `https://api.krow.cn`）。
 
-支持的策略（`SUPPORTED_STRATEGIES`）：`evidence_chain` / `hypothesis_test` /
-`comparative_analysis` / `temporal_trace`。全量推理策略见引擎
-`modules.knowledge.reasoning_strategies.STRATEGIES`（含需 CSV 定量依赖
-DoWhy/causal-learn 的因果发现类策略，本 cookbook 不默认演示）。
+支持的策略（`SUPPORTED_STRATEGIES`）：
+
+| 策略 | 范式 | 依赖 |
+|------|------|------|
+| `evidence_chain` | 链式证据逐级抬升后验 | `[ontology]` |
+| `hypothesis_test` | ACH 竞争假设排除 | `[ontology]` |
+| `comparative_analysis` | 多对象横向对比 | `[ontology]` |
+| `temporal_trace` | 时间线追踪 | `[ontology]` |
+| `causal_discovery` | 因果发现六阶段科研闭环 | 定性 `[ontology]` / 定量 `[reasoning]` |
+| `bayes_inference` | 贝叶斯网概率推理 | `[reasoning]`（pgmpy） |
+
+全量推理策略见引擎 `modules.knowledge.reasoning_strategies.STRATEGIES`（如
+`causal_effect` / `counterfactual_analysis` / `knowledge_compile` 等）。
 
 ## 输出
 

@@ -85,3 +85,48 @@ def test_reasoning_analyst_evidence_chain_journey(tmp_path: Path) -> None:
         f"reasoning_completed 应为 True（success={journey['success_flag']} / "
         f"concluded={journey['concluded']}）—— 这正是 cookbook 想传达的判定经验"
     )
+
+
+@require_real_llm
+def test_reasoning_analyst_causal_discovery_journey(tmp_path: Path) -> None:
+    """Tier 2：病例资料 → causal_discovery 因果发现六阶段闭环 → 带可信度的因果结论.
+
+    2026-06-29 缺口B：补齐因果发现策略真机覆盖（用户真实场景——肺癌科研——用的正是
+    causal_discovery）。定性路径（LLM 提因果边 + 定性反驳）无需 dowhy/causal-learn；
+    本机装齐 [reasoning] 重型库时还会跑统计因果发现/估计的定量路径。
+    """
+    project_dir = tmp_path / "rp"
+    output_dir = tmp_path / "output"
+
+    card = load_expected_card("tier2_causal.yaml", cookbook_dir="reasoning-analyst")
+
+    assert_journey_with_retry(
+        cookbook_dir="reasoning-analyst",
+        argv=[
+            "causal_discovery",
+            "--project-dir", str(project_dir),
+            "--output-dir", str(output_dir),
+            "--quiet",
+        ],
+        card=card,
+        cwd=tmp_path,
+        timeout_s=2700,
+    )
+
+    summary_path = output_dir / "summary.json"
+    assert summary_path.exists(), "缺 summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["n_completed"] >= 1, f"因果发现 journey 未完成：{summary}"
+
+    journey = summary["journeys"][0]
+    assert journey["strategy"] == "causal_discovery"
+    assert journey["reasoning_completed"] is True, (
+        f"reasoning_completed 应为 True（success={journey['success_flag']} / "
+        f"concluded={journey['concluded']}）"
+    )
+    # 因果发现必须真的调到了因果/推理工具链（否则只是普通问答，没走因果闭环）
+    metrics = journey.get("metrics") or {}
+    reasoning_tools = metrics.get("reasoning_tool_calls") or {}
+    assert reasoning_tools, (
+        f"因果发现 journey 未调用任何推理工具（疑似没走因果闭环）：metrics={metrics}"
+    )

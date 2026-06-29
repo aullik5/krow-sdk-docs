@@ -43,6 +43,7 @@ planner 选中它）。详见 ``reasoning_journeys.build_reasoning_task_context`
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -50,6 +51,7 @@ import sys
 from pathlib import Path
 
 from reasoning_journeys import (
+    REASONING_EXTRA_STRATEGIES,
     SUPPORTED_STRATEGIES,
     persist_reasoning_outcome,
     run_reasoning,
@@ -59,6 +61,57 @@ try:  # BudgetSpec 是可选增强
     from krow_agent_sdk import BudgetSpec
 except Exception:  # noqa: BLE001
     BudgetSpec = None  # type: ignore[assignment]
+
+def _ensure_utf8_stdio() -> None:
+    """把 stdout/stderr 切到 UTF-8，避免 Windows GBK 控制台打印 emoji/中文崩溃。
+
+    背景：Windows 默认控制台
+    编码是 GBK（cp936），``print("🔬 ...")`` 直接抛 ``UnicodeEncodeError: 'gbk' codec
+    can't encode character '\\U0001f52c'`` —— cookbook 还没进推理就秒崩，真实 Windows
+    用户 ``python main.py`` 必撞。System-1 修法：进程启动即把标准流 reconfigure 成
+    UTF-8（Python 3.7+ ``TextIOWrapper.reconfigure``），与设 ``PYTHONIOENCODING=utf-8``
+    等效但无需用户额外配置。已是 UTF-8 / 不支持 reconfigure 时静默跳过（零副作用）。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, "encoding", "") or "").lower()
+        if "utf-8" in enc or "utf8" in enc:
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            # 兜底：极端环境 reconfigure 失败也不阻塞主流程（降级到原编码）。
+            with contextlib.suppress(Exception):
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
+def _warn_if_reasoning_extra_missing(strategies: list[str]) -> None:
+    """选了因果/概率策略但缺 ``[reasoning]`` 重型库时给 fail-soft 提示（不阻塞）。
+
+    引擎在缺 dowhy/causal-learn/pgmpy 时会 fail-loud 指引降级到定性路径，cookbook 这里
+    只是提前给用户一句可执行的安装建议，避免"为什么因果图没有定量估计"的困惑。
+    """
+    import importlib.util
+
+    if not any(s in REASONING_EXTRA_STRATEGIES for s in strategies):
+        return
+    missing = [
+        name
+        for name, mod in (
+            ("dowhy", "dowhy"),
+            ("causal-learn", "causallearn"),
+            ("pgmpy", "pgmpy"),
+        )
+        if importlib.util.find_spec(mod) is None
+    ]
+    if missing:
+        print(
+            "⚠️  选中的因果/概率策略需要定量统计库，但缺少："
+            f"{', '.join(missing)}\n"
+            "   定性路径仍可跑（LLM 提因果边 + 定性反驳）；要启用**定量**因果发现/"
+            "估计/贝叶斯网推断，请装：\n"
+            "     pip install \"krow-agent-sdk[reasoning]\"",
+            file=sys.stderr,
+        )
+
 
 _HERE = Path(__file__).resolve().parent
 _DEFAULT_SAMPLE = _HERE / "sample_data"
@@ -77,6 +130,17 @@ _DEFAULT_QUESTIONS: dict[str, str] = {
     ),
     "temporal_trace": (
         "按时间顺序追踪本病例从胸痛起病到确诊的关键证据演进。"
+    ),
+    "causal_discovery": (
+        "从本病例资料中挖掘「下壁急性心肌梗死」的因果结构："
+        "哪些因素是致病/恶化的因果致因，哪些只是伴随相关？"
+        "请走科研闭环（抽取→规律发现→提假设→竞争排除→因果验证→结论），"
+        "对每条因果边给出反驳后的可信度。"
+    ),
+    "bayes_inference": (
+        "基于本病例的发热 + 咳嗽 + 呼吸困难证据，用贝叶斯网量化"
+        "「心源性呼吸困难」与「肺源性呼吸困难」各自的后验概率，"
+        "并说明每条新证据如何更新信念。"
     ),
 }
 
@@ -165,6 +229,7 @@ def _run_one(
 
 
 def main(argv: list[str] | None = None) -> int:
+    _ensure_utf8_stdio()  # Windows GBK 控制台 emoji/中文打印守护（须在任何 print 前）
     parser = argparse.ArgumentParser(
         description="Krow SDK Cookbook · Reasoning Analyst（纯 SDK 推理洞察管线）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -241,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     strategies = ["evidence_chain", "hypothesis_test"] if args.all else [args.strategy]
+    _warn_if_reasoning_extra_missing(strategies)
 
     print("🔬 推理分析任务")
     print(f"   project:  {project_dir}")

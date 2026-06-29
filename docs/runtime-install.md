@@ -397,6 +397,23 @@ vs 主仓 ``krow_lite`` 桌面版（~280 MB Nuitka 单文件）—— wheel 形�
 ``python-docx`` / ``numpy`` / ``networkx`` / ``PyMuPDF`` / 等），``pip install
 krow-agent-sdk-runtime`` 会全部自动拉取。
 
+**定量因果/概率推理按需 opt-in（2026-06-29 决策）**：runtime 默认装机保持轻量
+``krow-agent-sdk[office,ontology]``——覆盖 Office 文档栈 + **定性**推理策略
+（evidence_chain / hypothesis_test / comparative_analysis / temporal_trace）+ wiki/图谱。
+``causal_discovery`` 的**因果发现/估计/反事实**定量路径与 ``bayes_inference`` 的
+**贝叶斯网概率推断**需额外一行 opt-in：
+
+```bash
+pip install "krow-agent-sdk[reasoning]"          # 或
+pip install "krow-agent-sdk-runtime[reasoning]"  # runtime 侧等价入口
+```
+
+``[reasoning]`` = ``[ontology]`` 超集 + ``scipy`` / ``pgmpy`` / ``dowhy`` / ``causal-learn``，
+装机磁盘相对 ``[office]`` 约 +350 MB（dowhy 拉 cvxpy/numba/llvmlite 栈）。设计取舍：大多数
+plugin 不跑定量统计，默认不应被迫吞这部分体积；要全功能则装 ``krow-agent-sdk-runtime[all]``。
+cookbook 在选了 ``causal_discovery`` / ``bayes_inference`` 但未装 ``[reasoning]`` 时会
+fail-soft 提示（不静默崩）。
+
 **例外**：``[remote]`` extra（``fastapi`` / ``uvicorn`` / ``websockets`` / ``psutil``）
 仅在你启用 ``with_http_gateway()`` 给前端做 SSE 时才需要——按需 ``pip install
 krow-agent-sdk-runtime[remote]``。

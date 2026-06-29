@@ -26,6 +26,29 @@ def test_supported_strategies_nonempty() -> None:
     assert "hypothesis_test" in rj.SUPPORTED_STRATEGIES
 
 
+def test_supported_strategies_cover_causal_and_bayes() -> None:
+    """2026-06-29 缺口B：补齐因果发现 + 概率推理，覆盖推理管线全部范式。"""
+    assert "causal_discovery" in rj.SUPPORTED_STRATEGIES
+    assert "bayes_inference" in rj.SUPPORTED_STRATEGIES
+
+
+def test_reasoning_extra_strategies_set() -> None:
+    """因果/概率策略标注为需 [reasoning] 重型依赖（UX 提示用）。"""
+    expected = {"causal_discovery", "bayes_inference"}
+    assert set(rj.REASONING_EXTRA_STRATEGIES) == expected
+    # 必须是 SUPPORTED_STRATEGIES 的子集（否则提示了一个跑不了的策略）
+    supported = set(rj.SUPPORTED_STRATEGIES)
+    assert set(rj.REASONING_EXTRA_STRATEGIES).issubset(supported)
+
+
+def test_build_task_context_causal_discovery() -> None:
+    ctx = rj.build_reasoning_task_context(
+        strategy="causal_discovery", question="挖掘因果结构"
+    )
+    assert ctx["strategy"] == "causal_discovery"
+    assert ctx["act_name"] == "reasoning_pipeline"
+
+
 def test_build_task_context_shape() -> None:
     ctx = rj.build_reasoning_task_context(
         strategy="evidence_chain", question="核实论断 X"
@@ -219,3 +242,27 @@ def test_main_importable_and_builds_parser() -> None:
     assert callable(main.main)
     assert "evidence_chain" in main._DEFAULT_QUESTIONS
     assert "hypothesis_test" in main._DEFAULT_QUESTIONS
+
+
+def test_main_default_questions_cover_all_strategies() -> None:
+    """每个支持的策略都要有默认问题，否则裸跑 ``python main.py <strategy>`` 会落空。"""
+    import main
+    for strat in rj.SUPPORTED_STRATEGIES:
+        assert strat in main._DEFAULT_QUESTIONS, f"缺默认问题：{strat}"
+
+
+def test_ensure_utf8_stdio_no_crash() -> None:
+    """缺口A 回归：UTF-8 stdio 守护可幂等调用、不抛异常（Windows GBK emoji 崩溃根治）。"""
+    import main
+    main._ensure_utf8_stdio()
+    main._ensure_utf8_stdio()  # 幂等
+
+
+def test_warn_if_reasoning_extra_missing_no_crash(capsys) -> None:
+    """选定性策略时不应给重型依赖提示；选因果策略时函数本身不崩。"""
+    import main
+    main._warn_if_reasoning_extra_missing(["evidence_chain"])
+    out = capsys.readouterr()
+    assert "krow-agent-sdk[reasoning]" not in out.err
+    # 因果策略：无论本机是否装齐 dowhy/pgmpy，函数都不应抛异常
+    main._warn_if_reasoning_extra_missing(["causal_discovery"])
