@@ -309,6 +309,33 @@ agent = (
 )
 ```
 
+#### `with_reasoning_artifacts(enable: bool = True) -> AgentBuilder` (PR-A · 2026-07-06)
+
+启用**推理结构化产物出口**（默认关闭，零回归）。启用后 `build()` 挂载 `ReasoningResultRouter`（零 UI 依赖，与桌面 / E2E harness 共用 `init_reasoning_result_router` SSOT 入口）：推理任务（`reasoning_pipeline` ACT / reasoning 策略）收尾时自动把结构化 `ReasoningResult`（假设 / 证据 / ACH 矩阵 / 疑点 / 递归推理树 / 完整度记分卡）落盘到 `<project_root>/.krow/reasoning/{id}.json`，并发布 `reasoning.result_ready` 事件（含 `reasoning_id` + `result_path`）。
+
+读取产物走 [§8.3 data facade](#83-data--只读数据-facade) 的 `get_reasoning_result` / `list_reasoning_results`。
+
+> Router 是进程级单例（与桌面同语义）：同进程多 Agent 同时启用时，后 build 的实例接管（先前实例订阅被 close）。
+
+```python
+from krow_agent_sdk import AgentBuilder, data
+
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(os.environ["KROW_API_KEY"])
+    .with_project_root("/data/case")
+    .with_reasoning_artifacts()          # ← 开启结构化产物落盘
+    .build()
+)
+agent.run(
+    "谁是真凶？用竞争假设排除法逐条核验证据。",
+    task_context={"source": "reasoning_panel", "act_name": "reasoning_pipeline",
+                  "strategy": "hypothesis_test"},
+)
+result = data.get_reasoning_result()      # 最新一条（headless，与桌面同一份产物）
+print(result["hypotheses"], result["metadata"].get("completeness_scorecard"))
+```
+
 #### `with_tool_execution_timeout(timeout: int | dict[str, int]) -> AgentBuilder` (FR-2 · 2026-06-15)
 
 设置**单工具执行超时**。micro ReACT 单次工具调用默认硬超时仅 30s（内置
@@ -2209,6 +2236,10 @@ from krow_agent_sdk import data
 | `data.query_global_ontology(query, *, project_root=None, limit=10)` | `(str, ...) -> dict` | `query` / `matches[{object_type, id, label}]` / `match_count` |
 | `data.get_memory_stats()` | `() -> dict` | `is_initialized` / `stats` (MemoryGraphService.get_stats() 转发) |
 | `data.query_memories(query_text, *, limit=10, session_id=None, project_id=None)` | `(str, ...) -> dict` | `query` / `results[{id, node_type, title, content_preview, strength, tags}]` / `count` |
+| `data.list_reasoning_results(project_root=None, limit=20)` | `(str\|Path\|None, int) -> dict` | `results[{reasoning_id, path, mtime}]`（按 mtime 倒序）/ `count` |
+| `data.get_reasoning_result(reasoning_id=None, project_root=None)` | `(str\|None, str\|Path\|None) -> dict` | `ReasoningResult.model_dump` 结构（`hypotheses` / `evidences` / ACH 矩阵 / `doubts` / `reasoning_tree` / `metadata.completeness_scorecard`）；`reasoning_id=None` 取最新一条 |
+
+> **推理产物出口**（PR-A · 议题 3）：`list_reasoning_results` / `get_reasoning_result` 读的是 `<project_root>/.krow/reasoning/*.json`，**前置** `AgentBuilder.with_reasoning_artifacts()` 已启用（见 [§2.4](#24-预算与-http-gateway)）；未启用时目录为空。这让 headless SDK 拿到与桌面推理工作台**同一份结构化产物**（竞争假设矩阵 / 证据链 / 疑点 / 递归推理树），只是没有 UI 画布。需要强类型时 `from krow_agent_sdk import ReasoningResult; ReasoningResult.model_validate(d)`（惰性 re-export）。
 
 #### 设计原则
 

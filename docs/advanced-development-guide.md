@@ -1411,6 +1411,47 @@ result = agent.run(
   `source: reasoning_panel` 与 `act_name` 锁不冲突——它只改任务上下文的推理分支，ACT 仍锁定。
   实战参考 cookbook：[`examples/cookbook/reasoning-analyst/`](../../packages/krow-agent-sdk/examples/cookbook/reasoning-analyst/)。
 
+#### 6.1.4 取回结构化推理产物（headless · 与桌面同一份）
+
+纯 SDK 默认**不落盘** `.krow/reasoning/{id}.json`（那条路由只在桌面 / 后台任务队列集成时挂载）。要在 headless 拿到与桌面推理工作台**同一份结构化产物**（竞争假设矩阵 / 证据链 / 疑点 / 递归推理树 / 完整度记分卡），build 时 opt-in `with_reasoning_artifacts()`：
+
+```python
+from krow_agent_sdk import AgentBuilder, data
+
+agent = (
+    AgentBuilder().with_krow_api_key(key).with_project_root("/data/case")
+    .with_reasoning_artifacts()          # 挂 ReasoningResultRouter（进程级单例）
+    .build()
+)
+agent.run("谁是真凶？", task_context={"source": "reasoning_panel",
+          "act_name": "reasoning_pipeline", "strategy": "hypothesis_test"})
+
+r = data.get_reasoning_result()          # None = 最新一条
+print(r["hypotheses"], r["metadata"].get("completeness_scorecard"))
+for item in data.list_reasoning_results()["results"]:
+    print(item["reasoning_id"], item["mtime"])
+```
+
+API 详见 [api-reference.md §2.4 `with_reasoning_artifacts` + §8.3 data facade](./api-reference.md#83-data--只读数据-facade)。
+
+#### 6.1.5 三个真实世界 journey 预设（cookbook `--preset`）
+
+`reasoning-analyst` cookbook 内置三个贴近真实场景的完整 journey，**除 UI 外等价桌面**：
+
+| 预设 | 场景 | 策略 | 真数据环境变量 |
+|---|---|---|---|
+| `target_discovery` | 肺癌论文找靶点（区分因果致因 vs 相关） | `causal_discovery` | `KROW_JOURNEY_LUNG_CANCER_PAPERS` |
+| `whodunit_x` / `whodunit_z` | X / Z 悲剧推理真凶（ACH 竞争假设排除） | `hypothesis_test` | `KROW_JOURNEY_TRAGEDY_X` / `_Z` |
+
+```bash
+# smoke（随仓零版权合成微样例，无真数据也跑通全链路）
+python main.py --preset whodunit_x
+# 复现完整效果（指向你自备的期刊 PDF / 小说全文；版权数据不进仓）
+$env:KROW_JOURNEY_TRAGEDY_X = 'D:\...\X.txt'; python main.py --preset whodunit_x
+```
+
+> **版权合规**：期刊 PDF / 小说译本都不进公开仓，仓里只随发自撰的零版权合成微样例。设对应 env 或 `--sources` 指向真数据即复现。预设定义见 cookbook `real_world_journeys.py`。
+
 ### 6.2 LLM helper（在 LLM-driven Tool 中按需用，注意 §1.4 反模式 C）
 
 ```python
