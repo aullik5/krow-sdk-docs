@@ -50,6 +50,11 @@ import shutil
 import sys
 from pathlib import Path
 
+from real_world_journeys import (
+    PRESETS,
+    get_preset,
+    resolve_journey_sources,
+)
 from reasoning_journeys import (
     REASONING_EXTRA_STRATEGIES,
     SUPPORTED_STRATEGIES,
@@ -249,6 +254,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--question", default=None, help="自定义分析问题")
     parser.add_argument(
+        "--preset",
+        default=None,
+        choices=list(PRESETS),
+        help=(
+            "真实世界 journey 预设（PR-B）：target_discovery（肺癌找靶点）/ "
+            "whodunit_x（X 悲剧真凶）/ whodunit_z（Z 悲剧真凶）。缺真数据时"
+            "自动用随仓合成微样例跑通（设对应 env 指向真数据即复现完整效果）。"
+        ),
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         help="一次跑 evidence_chain + hypothesis_test 两个 journey",
@@ -281,6 +296,32 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+
+    # ── PR-B 真实世界预设：--preset 覆盖 strategy / question / sources ──
+    preset_obj = None
+    preset_question = None
+    if args.preset:
+        preset_obj = get_preset(args.preset)
+        override = args.sources[0] if args.sources else None
+        try:
+            src_path, is_real = resolve_journey_sources(preset_obj, override=override)
+        except FileNotFoundError as exc:
+            print(f"❌ {exc}", file=sys.stderr)
+            return 1
+        args.strategy = preset_obj.strategy
+        args.sources = [str(src_path)]
+        preset_question = preset_obj.question
+        print(
+            f"🎯 预设 journey：{preset_obj.name}（策略 {preset_obj.strategy}）\n"
+            f"   资料：{src_path} "
+            f"（{'真实数据' if is_real else '随仓合成微样例 · smoke'}）"
+        )
+        if not is_real:
+            print(
+                f"   ℹ️  用真实数据复现完整效果：设 {preset_obj.data_env} 指向"
+                f" {preset_obj.data_hint}",
+                file=sys.stderr,
+            )
 
     # ── 项目目录 + 资料准备（把 sample_data 拷进 project_dir 供推理工具读取）──
     project_dir = Path(args.project_dir).expanduser().resolve()
@@ -315,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results = []
     for strategy in strategies:
-        question = args.question or _DEFAULT_QUESTIONS.get(
+        question = args.question or preset_question or _DEFAULT_QUESTIONS.get(
             strategy, f"请用 {strategy} 策略分析资料。"
         )
         results.append(

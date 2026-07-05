@@ -130,3 +130,103 @@ def test_reasoning_analyst_causal_discovery_journey(tmp_path: Path) -> None:
     assert reasoning_tools, (
         f"因果发现 journey 未调用任何推理工具（疑似没走因果闭环）：metrics={metrics}"
     )
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Tier 3：三个真实世界 journey 预设（PR-B · 2026-07-06 三议题辩论 议题 3）
+#
+# 默认用随仓的**零版权合成微样例**跑通全链路（smoke 语义），无需真实数据集。
+# 设对应环境变量（KROW_JOURNEY_TRAGEDY_X / _Z / KROW_JOURNEY_LUNG_CANCER_PAPERS）
+# 指向真数据即在本机复现完整效果。结果导向断言（去 UI），等价桌面对应 journey 卡。
+# ════════════════════════════════════════════════════════════════════════
+
+
+@require_real_llm
+def test_preset_whodunit_x_journey(tmp_path: Path) -> None:
+    """Tier 3：X 悲剧真凶 → hypothesis_test 竞争假设排除（ACH）→ 真凶结论."""
+    project_dir = tmp_path / "rp"
+    output_dir = tmp_path / "output"
+    card = load_expected_card("tier3_whodunit.yaml", cookbook_dir="reasoning-analyst")
+
+    assert_journey_with_retry(
+        cookbook_dir="reasoning-analyst",
+        argv=[
+            "--preset", "whodunit_x",
+            "--project-dir", str(project_dir),
+            "--output-dir", str(output_dir),
+            "--quiet",
+        ],
+        card=card,
+        cwd=tmp_path,
+        timeout_s=2400,
+    )
+
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["n_completed"] >= 1, f"whodunit_x journey 未完成：{summary}"
+    journey = summary["journeys"][0]
+    assert journey["strategy"] == "hypothesis_test"
+    assert journey["reasoning_completed"] is True
+
+
+@require_real_llm
+def test_preset_whodunit_z_journey(tmp_path: Path) -> None:
+    """Tier 3：Z 悲剧真凶 → hypothesis_test 竞争假设排除（ACH）→ 真凶结论.
+
+    无 KROW_JOURNEY_TRAGEDY_Z 时回落到与 whodunit_x 相同的合成密室短篇（smoke）；
+    设 env 指向 Z 悲剧全文即复现完整效果。
+    """
+    project_dir = tmp_path / "rp"
+    output_dir = tmp_path / "output"
+    card = load_expected_card("tier3_whodunit.yaml", cookbook_dir="reasoning-analyst")
+
+    assert_journey_with_retry(
+        cookbook_dir="reasoning-analyst",
+        argv=[
+            "--preset", "whodunit_z",
+            "--project-dir", str(project_dir),
+            "--output-dir", str(output_dir),
+            "--quiet",
+        ],
+        card=card,
+        cwd=tmp_path,
+        timeout_s=2400,
+    )
+
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["n_completed"] >= 1, f"whodunit_z journey 未完成：{summary}"
+    journey = summary["journeys"][0]
+    assert journey["strategy"] == "hypothesis_test"
+    assert journey["reasoning_completed"] is True
+
+
+@require_real_llm
+def test_preset_target_discovery_journey(tmp_path: Path) -> None:
+    """Tier 3：肺癌找靶点 → causal_discovery 科研闭环 → 带可信度的候选靶点结论."""
+    project_dir = tmp_path / "rp"
+    output_dir = tmp_path / "output"
+    card = load_expected_card(
+        "tier3_target_discovery.yaml", cookbook_dir="reasoning-analyst"
+    )
+
+    assert_journey_with_retry(
+        cookbook_dir="reasoning-analyst",
+        argv=[
+            "--preset", "target_discovery",
+            "--project-dir", str(project_dir),
+            "--output-dir", str(output_dir),
+            "--quiet",
+        ],
+        card=card,
+        cwd=tmp_path,
+        timeout_s=2700,
+    )
+
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["n_completed"] >= 1, f"target_discovery journey 未完成：{summary}"
+    journey = summary["journeys"][0]
+    assert journey["strategy"] == "causal_discovery"
+    assert journey["reasoning_completed"] is True
+    metrics = journey.get("metrics") or {}
+    assert metrics.get("reasoning_tool_calls"), (
+        f"肺癌找靶点未调用任何推理工具（疑似没走因果闭环）：metrics={metrics}"
+    )

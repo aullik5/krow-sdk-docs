@@ -1,0 +1,32 @@
+# reasoning-analyst Tier 3 预期结果卡（target_discovery 肺癌找靶点 · PR-B）
+#
+# 2026-07-06 三议题辩论 议题 3：真实世界 journey——肺癌论文找靶点（causal_discovery）。
+# 「等价桌面」验收 = 桌面因果 journey 卡的结果导向子集（去 UI 断言 canvas/drawer）。
+#
+# 数据分层：smoke（合成微样例，CI）用宽松阈值；真数据（KROW_JOURNEY_LUNG_CANCER_PAPERS）
+# 本地 real-LLM 跑，同一张卡（结果导向断言对合成/真数据都成立）。
+
+exit_code: 0
+
+# causal_discovery 六阶段科研闭环最重；给足余量（lessons "并行 walltime 硬阈"）。
+max_walltime_s_serial: 2400
+max_walltime_s_parallel: 3000
+
+required_artifacts:
+  - reasoning_causal_discovery.md
+  - reasoning_causal_discovery.json
+  - summary.json
+
+min_artifact_bytes:
+  reasoning_causal_discovery.md: 200
+  reasoning_causal_discovery.json: 200
+  summary.json: 80
+
+required_keywords_in:
+  reasoning_causal_discovery.json:
+    - reasoning_completed
+    - final_output
+    - strategy
+  summary.json:
+    - n_completed
+    - reasoning_completed

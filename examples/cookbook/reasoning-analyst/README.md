@@ -88,6 +88,34 @@ journey、`--sources` 换资料、`--output-dir` / `--project-dir` 改落点、
 全量推理策略见引擎 `modules.knowledge.reasoning_strategies.STRATEGIES`（如
 `causal_effect` / `counterfactual_analysis` / `knowledge_compile` 等）。
 
+## 真实世界 journey 预设（`--preset`）
+
+三个贴近真实科研 / 推理场景的完整 journey，与桌面推理工作台**除 UI 外等价**：
+
+| 预设 | 场景 | 策略 | 真数据环境变量 |
+|------|------|------|----------------|
+| `target_discovery` | 肺癌论文找靶点（区分因果致因 vs 相关） | `causal_discovery` | `KROW_JOURNEY_LUNG_CANCER_PAPERS` |
+| `whodunit_x` | X 的悲剧推理真凶（ACH 竞争假设排除） | `hypothesis_test` | `KROW_JOURNEY_TRAGEDY_X` |
+| `whodunit_z` | Z 的悲剧推理真凶（ACH 竞争假设排除） | `hypothesis_test` | `KROW_JOURNEY_TRAGEDY_Z` |
+
+```bash
+# smoke（无真数据也能跑通全链路）—— 自动用随仓的零版权合成微样例
+python main.py --preset whodunit_x
+python main.py --preset target_discovery
+
+# 复现完整效果 —— 指向你自备的真数据（期刊 PDF / 小说全文）
+$env:KROW_JOURNEY_TRAGEDY_X = 'D:\...\X的悲剧-隐藏结尾版本.txt'   # PowerShell
+python main.py --preset whodunit_x
+# 或直接传 --sources 覆盖
+python main.py --preset target_discovery --sources D:\...\肺癌科研智能体\papers
+```
+
+> **版权合规**：期刊 PDF（出版商版权）与侦探小说译本（作者/译者版权）**都不进公开
+> 仓**。仓里只随发**自撰的零版权合成微样例**（`sample_data/real_world_synthetic/`：
+> 一篇仿写密室短篇 + 一组合成肺癌文献摘要，均为演示虚构、不代表真实医学证据），
+> 够 smoke 跑通管线。设对应环境变量或 `--sources` 指向你自己的资料即复现完整 journey。
+> 预设定义见 `real_world_journeys.py`。
+
 ## 输出
 
 ```
