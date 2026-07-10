@@ -86,6 +86,18 @@ def test_build_task_context_empty_question_fail_loud() -> None:
         rj.build_reasoning_task_context(strategy="evidence_chain", question="  ")
 
 
+def test_build_task_context_depth_mode() -> None:
+    """PR-S2（2026-07-10）：depth_mode=True 才写入 ctx；默认不写（省长预算）。"""
+    ctx = rj.build_reasoning_task_context(
+        strategy="hypothesis_test", question="Q", depth_mode=True
+    )
+    assert ctx["depth_mode"] is True
+    ctx_default = rj.build_reasoning_task_context(
+        strategy="hypothesis_test", question="Q"
+    )
+    assert "depth_mode" not in ctx_default
+
+
 # ════════════════════════════════════════════════════════════════════════
 # §2. ReasoningEventCollector（用 fake 事件，零 EventBus 依赖）
 # ════════════════════════════════════════════════════════════════════════
@@ -144,8 +156,28 @@ def test_collector_summary_shape() -> None:
     for key in (
         "event_types", "tool_calls_total", "reasoning_tool_calls",
         "cognitive_load_events", "conclusion_committed", "task_complete",
+        "intent_seeded", "mechanism_chain_events",
+        "transient_storms", "transient_storm_recoveries",
     ):
         assert key in s
+
+
+def test_collector_counts_s_series_events() -> None:
+    """PR-S3/S5/S7（2026-07-10）事件观测：seed / 机制链 / 瞬断风暴。"""
+    c = rj.ReasoningEventCollector()
+    c.handle(_FakeEvent("intent.seeded", {"session_key": "s1"}))
+    c.handle(_FakeEvent(
+        "reasoning.mechanism_chain",
+        {"attempted": True, "built": 3, "winner_id": "h2", "reason": "ok"},
+    ))
+    c.handle(_FakeEvent("provider.transient_storm", {"consecutive_failures": 3}))
+    c.handle(_FakeEvent("provider.transient_storm_recovered", {}))
+    assert c.intent_seeded == 1
+    assert c.mechanism_chain_events == [
+        {"attempted": True, "built": 3, "winner_id": "h2", "reason": "ok"}
+    ]
+    assert c.transient_storms == 1
+    assert c.transient_storm_recoveries == 1
 
 
 def test_event_type_compat_legacy_field() -> None:

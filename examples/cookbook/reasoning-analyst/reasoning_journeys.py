@@ -71,6 +71,7 @@ def build_reasoning_task_context(
     question: str,
     reasoning_id: str | None = None,
     project_root: str | Path | None = None,
+    depth_mode: bool = False,
 ) -> dict[str, Any]:
     """构造启动 reasoning 管线的 ``task_context``（纯 System-1，零 LLM）。
 
@@ -79,6 +80,10 @@ def build_reasoning_task_context(
         question: 分析问题（自然语言）。
         reasoning_id: 落盘 / 追踪用 id；缺省自动生成。
         project_root: 可选，供 wiki/graph/seed 数据定位。
+        depth_mode: 深度模式（PR-S2 · 2026-07-10）。显式声明"这个任务值得跑满"
+            → 引擎把墙钟预算直接抬到策略契约的 max_wallclock（如 hypothesis_test
+            7200s），避免长文本 ACH 任务被中途 forced conclude。与桌面推理工作台
+            的深挖开关同语义；默认关（普通任务不占长预算）。
 
     Returns:
         透传给 ``agent.run(task_context=...)`` 的 dict。
@@ -108,6 +113,8 @@ def build_reasoning_task_context(
     }
     if project_root is not None:
         ctx["project_root"] = str(project_root)
+    if depth_mode:
+        ctx["depth_mode"] = True
     return ctx
 
 
@@ -164,6 +171,15 @@ class ReasoningEventCollector:
     cognitive_load_events: list[dict[str, Any]] = field(default_factory=list)
     conclusion_committed: int = 0
     task_complete: int = 0
+    # PR-S5（2026-07-10 画布冷启动）：会话启动即 seed 问题卡（System-1 确定性）
+    intent_seeded: int = 0
+    # PR-S7（2026-07-10 Z悲剧 问题4）：胜出假设机制链（conclude 后一次 bounded
+    # LLM 调用产出定性因果链，payload 含 edges_created 等指标）
+    mechanism_chain_events: list[dict[str, Any]] = field(default_factory=list)
+    # PR-S3（2026-07-10 供给层 provider 税）：连续瞬断风暴 / 恢复事件——量化
+    # "墙钟去哪了"（基础设施重试 vs 真推理）
+    transient_storms: int = 0
+    transient_storm_recoveries: int = 0
     _token: str | None = None
 
     def handle(self, ev: Any) -> None:
@@ -189,6 +205,22 @@ class ReasoningEventCollector:
             self.conclusion_committed += 1
         elif et == "agent.task_complete":
             self.task_complete += 1
+        elif et == "intent.seeded":
+            self.intent_seeded += 1
+        elif et == "reasoning.mechanism_chain":
+            # payload 契约 = causal_tools.elicit_winner_mechanism_chain 返回值
+            self.mechanism_chain_events.append(
+                {
+                    "attempted": payload.get("attempted"),
+                    "built": payload.get("built"),
+                    "winner_id": payload.get("winner_id"),
+                    "reason": payload.get("reason"),
+                }
+            )
+        elif et == "provider.transient_storm":
+            self.transient_storms += 1
+        elif et == "provider.transient_storm_recovered":
+            self.transient_storm_recoveries += 1
 
     def attach(self) -> None:
         """订阅全局 EventBus 的所有事件（``*`` 通配）。"""
@@ -222,6 +254,10 @@ class ReasoningEventCollector:
             "cognitive_load_events": len(self.cognitive_load_events),
             "conclusion_committed": self.conclusion_committed,
             "task_complete": self.task_complete,
+            "intent_seeded": self.intent_seeded,
+            "mechanism_chain_events": list(self.mechanism_chain_events),
+            "transient_storms": self.transient_storms,
+            "transient_storm_recoveries": self.transient_storm_recoveries,
         }
 
 
@@ -330,6 +366,7 @@ def run_reasoning(
     project_root: str | Path,
     reasoning_id: str | None = None,
     stop_event: Any | None = None,
+    depth_mode: bool = False,
 ) -> dict[str, Any]:
     """纯 SDK、无 UI 启动 reasoning 管线并归一结果。
 
@@ -347,6 +384,7 @@ def run_reasoning(
         question=question,
         reasoning_id=reasoning_id,
         project_root=project_root,
+        depth_mode=depth_mode,
     )
     rid = task_context["reasoning_id"]
 

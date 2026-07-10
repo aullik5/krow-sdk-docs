@@ -20,9 +20,14 @@
    partial 接受层兜底，纯 SDK 没有）。本 cookbook 的"推理完成"判据是
    `final_output 非空 且（success 或 conclusion committed 事件）`。
 3. **过程可观测**：订阅 EventBus 采集工具调用 / `cognitive.load`（双环快环元认知）
-   / `reasoning.conclusion.committed` 等事件，量化推理工具链是否真跑。
+   / `reasoning.conclusion.committed` / `reasoning.mechanism_chain`（胜出假设定性
+   机制链）/ `provider.transient_storm`（供给层瞬断风暴——量化"墙钟去哪了"）等
+   事件，量化推理工具链是否真跑。
 4. **自助落盘**：纯 SDK 不自动写 `.krow/reasoning/{id}.json`（那条路由只在桌面 /
    BTQ 集成时挂载），cookbook 把结论落盘成 `reasoning_<strategy>.md` + `.json` 补齐缺口。
+5. **深度模式**（`--depth-mode`）：长文本 ACH 任务（如整本小说 whodunit）显式声明
+   "值得跑满"→ 引擎把墙钟预算抬到策略契约 max_wallclock（hypothesis_test 7200s），
+   与桌面推理工作台深挖开关同语义，避免中途 forced conclude 只交一半矩阵。
 
 ## 跑前
 
@@ -66,6 +71,9 @@ python main.py --all
 python main.py --chat-model qwen3.6-plus --reasoning-model qwen3.6-plus \
   --budget-llm-calls 40 --budget-walltime 600 \
   --base-url https://api.krow.cn   # staging / 私有部署才需要改
+
+# 深度模式（长文本 ACH 任务防中途 forced conclude · 引擎抬满策略契约墙钟）
+python main.py --preset whodunit_z --depth-mode
 ```
 
 可用 flag（`python main.py -h` 查全量）：`--question` 自定义问题、`--all` 跑两个

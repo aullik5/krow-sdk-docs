@@ -202,6 +202,7 @@ def _run_one(
         strategy=strategy,
         question=question,
         project_root=project_dir,
+        depth_mode=bool(getattr(args, "depth_mode", False)),
     )
 
     paths = persist_reasoning_outcome(
@@ -218,6 +219,16 @@ def _run_one(
     print(f"   📊 工具调用 {metrics.get('tool_calls_total')} 次 · "
           f"推理工具 {metrics.get('reasoning_tool_calls')}")
     print(f"   🧩 cognitive.load 事件 {metrics.get('cognitive_load_events')} 次")
+    mech = metrics.get("mechanism_chain_events") or []
+    if mech:
+        print(f"   🔗 胜出假设机制链：{mech}")
+    storms = metrics.get("transient_storms") or 0
+    if storms:
+        print(
+            f"   ⚡ 供给层瞬断风暴 {storms} 次"
+            f"（已恢复 {metrics.get('transient_storm_recoveries')} 次）——"
+            "墙钟部分消耗在基础设施重试，非推理本体"
+        )
     print(f"   📝 结论：{paths['markdown']}（{outcome['final_output_chars']} 字）")
 
     return {
@@ -276,6 +287,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--budget-llm-calls", type=int, default=None)
     parser.add_argument("--budget-walltime", type=int, default=None)
     parser.add_argument("--budget-replans", type=int, default=None)
+    parser.add_argument(
+        "--depth-mode",
+        action="store_true",
+        help=(
+            "深度模式（PR-S2）：显式声明任务值得跑满 → 引擎把墙钟预算抬到策略"
+            "契约 max_wallclock（如 hypothesis_test 7200s），避免长文本 ACH 任务"
+            "被中途 forced conclude。真数据 whodunit 预设建议加这个 flag。"
+        ),
+    )
     parser.add_argument("--reasoning-model", default=None)
     parser.add_argument("--chat-model", default=None)
     parser.add_argument(
