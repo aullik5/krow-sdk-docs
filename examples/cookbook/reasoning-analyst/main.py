@@ -211,6 +211,7 @@ def _run_one(
         strategy=strategy,
         question=question,
         reasoning_id=outcome["reasoning_id"],
+        project_dir=project_dir,  # P2：归档 .krow/reasoning/*.json 进产物
     )
 
     metrics = outcome.get("metrics") or {}

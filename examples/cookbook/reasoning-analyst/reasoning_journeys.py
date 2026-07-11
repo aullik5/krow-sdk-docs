@@ -299,6 +299,47 @@ def extract_reasoning_outcome(
     return outcome
 
 
+def archive_reasoning_json(
+    project_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    max_files: int = 5,
+) -> list[Path]:
+    """把项目 ``.krow/reasoning/**/*.json`` 归档进 journey output（P2 · 2026-07-11）。
+
+    动机（whodunit_z 走查）：journey 产物只有结论 md/json，事后想核查
+    记分卡 / 疑点闭环 / E2 checkpoint 时，桌面写的 reasoning 归档
+    （``.krow/reasoning/*.json`` + ``checkpoints/*.json``）不在 artifacts 里，
+    复盘只能翻用户机器。本函数把最新 ``max_files`` 份 json 平铺 copy 到
+    output_dir（文件名加 ``reasoning_archive_`` 前缀，run_journey 的
+    artifacts 收集器只认 output_dir 顶层文件）。
+
+    fail-soft：目录不存在 / copy 失败 → 跳过（归档纯增益，绝不阻断 journey）。
+    """
+    out = Path(output_dir)
+    src_root = Path(project_dir) / ".krow" / "reasoning"
+    copied: list[Path] = []
+    try:
+        if not src_root.is_dir():
+            return []
+        candidates = sorted(
+            (p for p in src_root.rglob("*.json") if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:max_files]
+        out.mkdir(parents=True, exist_ok=True)
+        for p in candidates:
+            dst = out / f"reasoning_archive_{p.name}"
+            try:
+                dst.write_bytes(p.read_bytes())
+                copied.append(dst)
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001 - 归档纯增益
+        return copied
+    return copied
+
+
 def persist_reasoning_outcome(
     outcome: dict[str, Any],
     *,
@@ -306,8 +347,12 @@ def persist_reasoning_outcome(
     strategy: str,
     question: str,
     reasoning_id: str,
+    project_dir: str | Path | None = None,
 ) -> dict[str, Path]:
     """把结论落盘成 markdown + json（补齐纯 SDK 不自动落盘的缺口）。
+
+    ``project_dir`` 给定时额外归档项目 ``.krow/reasoning/**/*.json``
+    （P2 · 见 ``archive_reasoning_json``）。
 
     Returns:
         ``{"markdown": Path, "json": Path}``。
@@ -350,6 +395,8 @@ def persist_reasoning_outcome(
     json_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    if project_dir is not None:
+        archive_reasoning_json(project_dir, out)
     return {"markdown": md_path, "json": json_path}
 
 

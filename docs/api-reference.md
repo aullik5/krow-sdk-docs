@@ -2681,6 +2681,9 @@ finally:
 | `KROW_ACH_FLIP_GROUNDING` | `1` | 反驳链接接地背书：`contradicts/refutes` 链接引用的证据必须真的提到被排除对象，否则降权为 weak 并 fail-loud 提示 |
 | `KROW_WALLCLOCK_CORPUS_SCALE` | `1` | 墙钟档位 × 语料规模线性联动（≤1.5x 封顶） |
 | `KROW_ITER_CORPUS_SCALE` | `1` | 迭代类预算（guard 补偿 / micro 迭代 cap）× 语料规模线性联动（≤4.0x 封顶，`KROW_ITER_CORPUS_MAX_FACTOR` 可调） |
+| `KROW_SCORECARD_ENFORCE` | `1` | 完整度记分卡 enforce（推理任务专属）：结案时有完整度缺口 → BLOCK 并注入具体缺口（有界 2 次后降级放行）；设 `0` 回 warning-only 观测。结案快照始终附在报告"完整度记分卡（结案快照）"小节 |
+| `KROW_DOUBT_GATE_MAX_BLOCKS` | `3` | 疑点消解门 block 预算（普通任务）：高置信疑点悬而未决时阻塞 conclude 的最大次数 |
+| `KROW_DOUBT_GATE_LONGRUN_MAX_BLOCKS` | `8` | 疑点消解门 block 预算（真推理族长跑任务）：配合 8h 弹性续期，先用续期时间驱动定向搜证消解疑点再谈降级；降级放行发 `reasoning.doubt.degraded` 事件（剩余疑点快照） |
 
 #### Feature flag 协议
 

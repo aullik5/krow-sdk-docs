@@ -257,6 +257,44 @@ def test_persist_writes_markdown_and_json(tmp_path: Path) -> None:
     assert payload["reasoning_completed"] is True
 
 
+def test_archive_reasoning_json_copies_newest(tmp_path: Path) -> None:
+    """P2（2026-07-11）：项目 .krow/reasoning/**/*.json 归档进 output。"""
+    project = tmp_path / "proj"
+    src = project / ".krow" / "reasoning"
+    (src / "checkpoints").mkdir(parents=True)
+    (src / "reasoning-a.json").write_text('{"a":1}', encoding="utf-8")
+    (src / "checkpoints" / "ckpt-1.json").write_text('{"c":1}', encoding="utf-8")
+    out = tmp_path / "out"
+    copied = rj.archive_reasoning_json(project, out)
+    names = sorted(p.name for p in copied)
+    assert names == [
+        "reasoning_archive_ckpt-1.json",
+        "reasoning_archive_reasoning-a.json",
+    ]
+    assert all(p.exists() for p in copied)
+
+
+def test_archive_reasoning_json_missing_dir_failsoft(tmp_path: Path) -> None:
+    assert rj.archive_reasoning_json(tmp_path / "nope", tmp_path / "out") == []
+
+
+def test_persist_with_project_dir_archives(tmp_path: Path) -> None:
+    project = tmp_path / "proj"
+    src = project / ".krow" / "reasoning"
+    src.mkdir(parents=True)
+    (src / "reasoning-b.json").write_text('{"b":2}', encoding="utf-8")
+    outcome = rj.extract_reasoning_outcome(_FakeResult(True, "结论"))
+    rj.persist_reasoning_outcome(
+        outcome,
+        output_dir=tmp_path / "out",
+        strategy="hypothesis_test",
+        question="q",
+        reasoning_id="rid-arch",
+        project_dir=project,
+    )
+    assert (tmp_path / "out" / "reasoning_archive_reasoning-b.json").exists()
+
+
 # ════════════════════════════════════════════════════════════════════════
 # §5. sample_data + main 可导入
 # ════════════════════════════════════════════════════════════════════════
