@@ -2670,6 +2670,18 @@ finally:
 | `KROW_OVERLAY_BEHAVIOR_CHANGE` | `1` | 慢环：允许 behavior-change 类教训晋级（软启动低权重） |
 | `KROW_OVERLAY_FULL_WEIGHT` | `1` | 慢环：允许 behavior-change 教训长期在线正向后升全权重（否则封顶 0.7） |
 
+#### 推理判别 / 长跑弹性 kill switch（0.9.0.48+ · 默认全 **ON**）
+
+> 这些 flag 控制推理任务的判别性收口门与规模自适应预算。**默认全开**，设 `0`/`false`/`off`/`no` 关闭对应环节。
+
+| env var | 默认 | 用途 |
+|---|---|---|
+| `KROW_REASONING_LONGRUN` | `1` | 8h 弹性长跑：墙钟到点时若推理对象仍有净增则里程碑续期（封顶 8h），并同步放开进度驱动的预算延长配额 + LLM 调用配额；每次续期发 `agent.max_wallclock_extended` 事件 + store checkpoint 落盘 |
+| `KROW_VAGUE_WINNER_GATE` | `1` | 收口门：胜出假设未具名（"不知名第三者"式）且仍有未排除的具名候选时阻塞结案，逼具名或诚实降置信 |
+| `KROW_ACH_FLIP_GROUNDING` | `1` | 反驳链接接地背书：`contradicts/refutes` 链接引用的证据必须真的提到被排除对象，否则降权为 weak 并 fail-loud 提示 |
+| `KROW_WALLCLOCK_CORPUS_SCALE` | `1` | 墙钟档位 × 语料规模线性联动（≤1.5x 封顶） |
+| `KROW_ITER_CORPUS_SCALE` | `1` | 迭代类预算（guard 补偿 / micro 迭代 cap）× 语料规模线性联动（≤4.0x 封顶，`KROW_ITER_CORPUS_MAX_FACTOR` 可调） |
+
 #### Feature flag 协议
 
 | 真值 | 假值 |
