@@ -1,0 +1,77 @@
+# target-nominator Tier 1 · GPNMB journey（黑色素瘤候选清单 → 多库取数 → 提名报告）
+#
+# 跑法：python main.py --cancer-type melanoma \
+#          --candidates GPNMB MLANA PMEL TYRP1 MCAM CSPG4 --quiet
+#
+# 用户价值优先（借鉴 Cell GPNMB · 准确性 > 完整性）
+# ════════════════════════════════════════
+#   1. 提名报告必须**真取数**（HPA / Open Targets 词条 url 溯源）→ source 关键词
+#   2. 必须覆盖四维（安全/有效/可药/广谱）→ required_keywords
+#   3. 必须给出打分矩阵结构化留档（ranking/grounded）→ target_scores.json
+#   4. **禁止凭记忆编造**（无免责式"推测表达"）→ forbidden_keywords
+#   5. 候选清单里的 GPNMB 必须出现在报告（谱系竞争基准）
+
+exit_code: 0
+
+# Walltime SSOT（并行 walltime 硬阈反模式：serial + parallel 双阈）
+# 靶点提名多库取数偏重（4 候选 × 2 库真网 + 打分 + 写报告 + LLM 偶发 replan），
+# 给足余量避免 LLM 抖动伪阳（实测单次 ~500-750s，慢跑可到 ~1000s+）。
+# subprocess 硬超时 1500s（见 journey e2e），卡阈 serial 留在其下。
+max_walltime_s_serial: 1400
+max_walltime_s_parallel: 2000
+
+required_artifacts:
+  - target_nomination.md
+  - target_scores.json
+  - summary.json
+
+min_artifact_bytes:
+  target_nomination.md: 800
+
+# ──────────────────────────────────────────────────
+# 维度 1（功能可用性）：报告必含核心信号
+# ──────────────────────────────────────────────────
+required_keywords_in:
+  target_nomination.md:
+    # 候选清单里的 GPNMB 必在报告（谱系竞争基准；无论是否被提名）
+    - "GPNMB"
+    # 癌种
+    - ["melanoma", "黑色素瘤", "Melanoma"]
+    # 四维覆盖（每维 OR 中英文）
+    - ["安全", "safety", "Safety", "normal", "健康组织"]
+    - ["有效", "efficacy", "Efficacy", "tumor", "肿瘤"]
+    - ["可药", "druggability", "tractability", "Tractability", "抗体", "antibody"]
+    - ["广谱", "breadth", "关联", "association", "pan-cancer", "跨癌种"]
+    # 数据溯源 url（真取数信号）
+    - ["proteinatlas.org", "platform.opentargets.org", "opentargets.org"]
+  target_scores.json:
+    - ["ranking", "aggregate"]
+    - ["grounded", "matrix"]
+
+# 禁止凭记忆编造 / 免责式推测（打分必须来自工具）
+forbidden_keywords_in:
+  target_nomination.md:
+    - "凭记忆"
+    - "推测表达"
+    - "估计表达水平"
+    - "据我所知"
+
+# 报告结构：候选打分表 + 提名结论
+required_sections_in:
+  target_nomination.md:
+    - ["提名", "Nomination", "最佳靶点", "推荐", "Recommendation"]
+    - ["打分", "评分", "Score", "score", "矩阵", "matrix", "四维"]
+
+# ──────────────────────────────────────────────────
+# 维度 2（markdown 结构）
+# ──────────────────────────────────────────────────
+markdown_structure:
+  target_nomination.md:
+    min_h2_sections: 2
+    no_duplicate_h2: true
+
+# ──────────────────────────────────────────────────
+# 维度 3（重复段落检测）
+# ──────────────────────────────────────────────────
+max_repeated_paragraphs:
+  target_nomination.md: 0

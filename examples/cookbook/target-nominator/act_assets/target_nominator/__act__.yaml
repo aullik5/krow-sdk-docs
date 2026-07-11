@@ -1,0 +1,21 @@
+name: target_nominator
+display_name: 靶点提名员（Target Nominator）
+description: |
+  当用户要"发现 / 提名 / 筛选 / 打分排序 CAR-T / ADC / 抗体靶点"，或给一批候选基因
+  要按安全 / 有效 / 可药 / 广谱多维证据排出最佳靶点时进入此 ACT。
+  本 ACT 内 Agent 会：
+  - 逐候选调 target_nominator_fetch_expression（HPA 表达：安全/有效维）
+  - 逐候选调 target_nominator_fetch_associations（Open Targets：可药/广谱维）
+  - 调 target_nominator_score_candidates 做多维加权打分排序（System 1 确定性 + 接地校验）
+  - 在 TargetNominationIntegrityGate 反编造守门下，读打分矩阵 + 溯源提名单一最佳靶点
+when_to_enter:
+  - "用户提到 靶点提名 / 靶点发现 / 靶点筛选 / target nomination / target discovery"
+  - "用户提到 CAR-T / ADC / 抗体 靶点候选 打分 / 排序 / 评分"
+  - "用户给一批候选基因要按安全/有效/可药/广谱多维排出最佳"
+  - "用户提到 借鉴 GPNMB / 肿瘤表面抗原 靶点"
+tools:
+  - target_nominator_fetch_expression
+  - target_nominator_fetch_associations
+  - target_nominator_score_candidates
+  - smart_file_write
+priority: 10

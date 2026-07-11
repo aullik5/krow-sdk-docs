@@ -1,0 +1,22 @@
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Demo runtime outputs (never commit)
+output/
+*.audit.jsonl
+target_nomination.md
+target_scores.json
+summary.json
+
+# Local env
+.env
+.env.*
+*.local
+
+# IDE
+.idea/
+.vscode/
