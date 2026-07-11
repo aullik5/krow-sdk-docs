@@ -31,3 +31,27 @@ required_keywords_in:
   summary.json:
     - n_completed
     - reasoning_completed
+
+# C3（2026-07-11 Z悲剧走查收紧）：具名 winner 或诚实未定。
+# 铁证：Z悲剧真机 run 胜出假设 h2「未具名第三者」赢在不可证伪（真凶=典狱长
+# h4 被无接地反驳边假排除）。契约：结论要么给具名 winner，要么诚实声明
+# 证据不足——禁止"确定地宣布一个不知名者是凶手"。引擎侧 vague_winner gate
+# （KROW_VAGUE_WINNER_GATE）防结案前，本卡防产物后（双层防护）。
+conclusion_contract:
+  reasoning_hypothesis_test.md:
+    named_winner_or_honest_uncertainty:
+      vague_winner_markers:
+        - 不知名第三
+        - 未具名
+        - 身份不明的凶手
+        - 神秘第三者
+        - 某个未知人物
+      honest_uncertainty_markers:
+        - 无法确定
+        - 无法最终确定
+        - 证据不足
+        - 尚不能确定
+        - 未能确定
+        - 存疑
+        - 置信度较低
+        - 不确定性
