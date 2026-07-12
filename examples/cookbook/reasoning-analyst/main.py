@@ -184,6 +184,10 @@ def _run_one(
         AgentBuilder()
         .with_krow_api_key(api_key)
         .with_project_root(str(project_dir))
+        # 2026-07-12：挂载 ReasoningResultRouter（桌面同款 SSOT 入口）——推理
+        # 收尾自动落盘结构化 ReasoningResult（.krow/reasoning/*.json，含完备性
+        # 记分卡 / 疑点 / link 接地状态），是完整报告导出 + P2 归档的数据源。
+        .with_reasoning_artifacts(True)
     )
     if args.base_url:
         builder = builder.with_base_url(args.base_url)

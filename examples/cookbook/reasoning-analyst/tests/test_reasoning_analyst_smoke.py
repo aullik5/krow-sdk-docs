@@ -278,6 +278,55 @@ def test_archive_reasoning_json_missing_dir_failsoft(tmp_path: Path) -> None:
     assert rj.archive_reasoning_json(tmp_path / "nope", tmp_path / "out") == []
 
 
+def test_export_full_report_failsoft_without_artifacts(tmp_path: Path) -> None:
+    """with_reasoning_artifacts 未启用（无 .krow/reasoning 产物）→ None，不抛。"""
+    assert rj.export_full_reasoning_report(
+        tmp_path / "proj", tmp_path / "out", strategy="hypothesis_test"
+    ) is None
+
+
+def test_export_full_report_renders_audit_sections(tmp_path: Path) -> None:
+    """完整报告导出复用桌面渲染 SSOT，含完备性记分卡审计小节（2026-07-12）。
+
+    需要 runtime（modules/）在场；wheel-only smoke 环境自动 skip。
+    """
+    pytest.importorskip("modules.knowledge.reasoning_utils")
+    project = tmp_path / "proj"
+    rd = project / ".krow" / "reasoning"
+    rd.mkdir(parents=True)
+    rid = "reasoning-2026-07-12-abc123"
+    payload = {
+        "id": rid,
+        "question": "谁是真凶？",
+        "strategy": "hypothesis_test",
+        "status": "completed",
+        "narrative_summary": "基于现有证据，无法唯一锁定真凶（诚实存疑）。",
+        "metadata": {
+            "completeness_scorecard": {
+                "components": [
+                    {
+                        "key": "doubt_resolution",
+                        "ratio": 0.5,
+                        "target": 1.0,
+                        "detail": "2 条疑点已处置 1 条",
+                    },
+                ],
+                "deficit_keys": ["doubt_resolution"],
+            },
+        },
+    }
+    (rd / f"{rid}.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+    out = rj.export_full_reasoning_report(
+        project, tmp_path / "out", strategy="hypothesis_test", reasoning_id=rid
+    )
+    assert out is not None and out.exists()
+    text = out.read_text(encoding="utf-8")
+    assert "完整度记分卡（结案快照）" in text
+    assert "无法唯一锁定真凶" in text
+
+
 def test_persist_with_project_dir_archives(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     src = project / ".krow" / "reasoning"

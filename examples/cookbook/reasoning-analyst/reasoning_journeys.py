@@ -340,6 +340,63 @@ def archive_reasoning_json(
     return copied
 
 
+def export_full_reasoning_report(
+    project_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    strategy: str,
+    reasoning_id: str | None = None,
+) -> Path | None:
+    """把桌面同款**完整报告**（含审计小节）导出进 journey output（2026-07-12）。
+
+    动机（whodunit_z 走查遗留项）：cookbook 自拼的 ``reasoning_<strategy>.md``
+    只有结论文本 + 过程指标，缺 #1220 加的完备性记分卡 / 疑点处置台账 /
+    排除背书审计小节——那些小节由桌面报告渲染 SSOT
+    （``reasoning_utils.get_canonical_report_markdown``）生成。本函数直接复用
+    该 SSOT（经 ``krow_agent_sdk`` re-export），不自拼渲染逻辑（DRY）。
+
+    前置：builder 已 ``with_reasoning_artifacts(True)``（Router 落盘
+    ``.krow/reasoning/<rid>.json``）。fail-soft：产物缺失 / runtime 不在 →
+    返回 None，绝不阻断 journey（完整报告是增益产物）。
+    """
+    try:
+        try:
+            from krow_agent_sdk import (
+                ReasoningResult,
+                get_canonical_report_markdown,
+                get_reasoning_result,
+            )
+        except ImportError:
+            # monorepo / 旧版 site-packages SDK 缺该 re-export 时，退回
+            # 与 runtime 同源的模块路径（wheel 安装两者等价）。
+            from modules.agent.sdk import (  # type: ignore[no-redef]
+                ReasoningResult,
+                get_canonical_report_markdown,
+                get_reasoning_result,
+            )
+        raw = get_reasoning_result(
+            reasoning_id=reasoning_id, project_root=project_dir
+        )
+        if not isinstance(raw, dict) or raw.get("error"):
+            # 指定 id 未命中（router 可能自派生 id）→ 降级取最新一条
+            raw = get_reasoning_result(project_root=project_dir)
+        if not isinstance(raw, dict) or raw.get("error"):
+            return None
+        rr = ReasoningResult.model_validate(raw)
+        md_text, _persisted = get_canonical_report_markdown(
+            rr, project_root=str(project_dir)
+        )
+        if not (md_text or "").strip():
+            return None
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        dst = out / f"reasoning_{strategy}_full_report.md"
+        dst.write_text(md_text, encoding="utf-8")
+        return dst
+    except Exception:  # noqa: BLE001 - 增益产物，绝不阻断
+        return None
+
+
 def persist_reasoning_outcome(
     outcome: dict[str, Any],
     *,
@@ -397,6 +454,11 @@ def persist_reasoning_outcome(
     )
     if project_dir is not None:
         archive_reasoning_json(project_dir, out)
+        full = export_full_reasoning_report(
+            project_dir, out, strategy=strategy, reasoning_id=reasoning_id
+        )
+        if full is not None:
+            return {"markdown": md_path, "json": json_path, "full_report": full}
     return {"markdown": md_path, "json": json_path}
 
 
