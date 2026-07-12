@@ -7,8 +7,14 @@
 exit_code: 0
 
 # walltime（serial 单跑 / parallel 同进程多 journey）
-max_walltime_s_serial: 900
-max_walltime_s_parallel: 1350
+# 2026-07-12 重标定：evidence_chain 推理深度随 #1226(G1-G5 接地/建链) + #1228
+# 增强后显著提升（真机 tool_counts：evidence≈14 / link≈12 / summarize≈6），叠加
+# real-LLM 空 action_input 二次恢复 + plan length cap 重规划等常态变异，两次真机
+# 单跑分别 1260s / 1537s（内容断言全过，仅 walltime 硬阈假阳）。900s 已不匹配现
+# 实推理规模。按 AGENTS.md "并行 walltime 硬阈" 反模式（速度是第 3 优先级，不该
+# System 1 硬闸假阳）对齐 whodunit tier 的 1800/2400，给足 real-LLM 长尾余量。
+max_walltime_s_serial: 1800
+max_walltime_s_parallel: 2400
 
 required_artifacts:
   - reasoning_evidence_chain.md
