@@ -2,5 +2,6 @@ __pycache__/
 *.pyc
 datasheet_project/
 output/
+.krow/
 *.egg-info/
 .pytest_cache/

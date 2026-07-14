@@ -75,18 +75,25 @@ _FIELD_PATTERNS: dict[str, str] = {
 }
 
 
-def parse_datasheet_file(path: str, *, model: str = "") -> dict[str, Any]:
+def parse_datasheet_file(path: str, *, model: str = "", project_root: str = "") -> dict[str, Any]:
     """解析单份 datasheet 文件 → 结构化规格字段（per-item 业务逻辑）.
 
     Args:
         path: datasheet 文件路径（cookbook 用 .txt/.md 合成；真实场景传 PDF 路径）。
+            支持项目内相对路径（如 ``upload/x.txt``），配合 project_root 解析。
         model: 期望型号（用于 per-item 身份校验：解析出的 part_number 应与之匹配）。
+        project_root: 项目根；用于把相对 path 解析到项目内（贴合 agent 沙箱约定）。
 
     Returns:
         dict 含 ok / model / fields / raw_chars / source。ok=False 表示单份解析失败
         （文件缺失 / 空 / 关键字段全缺）——由编排器隔离记 failed，不拖垮整批。
     """
     p = Path(path)
+    # 相对路径优先相对 project_root 解析（agent 传项目内相对路径），再退回 CWD。
+    if not p.is_absolute() and project_root:
+        candidate = Path(project_root) / path
+        if candidate.is_file():
+            p = candidate
     if not p.is_file():
         return _golden_error(
             f"datasheet 文件不存在：{path}",
@@ -208,7 +215,11 @@ def datasheet_batch_parse(
 
     def _process_one(bi: "BatchItem") -> "ItemResult":
         payload = bi.payload or {}
-        res = parse_datasheet_file(str(payload.get("path", "")), model=str(payload.get("model", "")))
+        res = parse_datasheet_file(
+            str(payload.get("path", "")),
+            model=str(payload.get("model", "")),
+            project_root=str(root),
+        )
         if not res.get("ok"):
             return ItemResult(item_id=bi.item_id, status=STATUS_FAILED, error=res.get("error"))
         status = STATUS_DEGRADED if res.get("degraded") else STATUS_COMPLETED
@@ -255,19 +266,29 @@ def datasheet_batch_parse(
 # ============================================================
 
 
-def _tool_parse_one(params: dict[str, Any]) -> dict[str, Any]:
-    return parse_datasheet_file(
-        str(params.get("path", "")), model=str(params.get("model", ""))
-    )
+# runtime 用 handler(**filtered_args) 按 input_schema property 名注入关键字参数
+# （见 modules/tools/manager.py:_validate_handler_signature / handler(**handler_args)）。
+# 因此 handler 形参名必须与 schema properties 对齐，并收 **kwargs 容忍注入的元数据。
+def _tool_parse_one(
+    path: str = "", model: str = "", **_: Any
+) -> dict[str, Any]:
+    return parse_datasheet_file(str(path or ""), model=str(model or ""))
 
 
-def _tool_batch_parse(params: dict[str, Any]) -> dict[str, Any]:
+def _tool_batch_parse(
+    items: Any = None,
+    project_root: str = "",
+    max_workers: int = 8,
+    batch_size: int = 50,
+    budget_s: float = 800.0,
+    **_: Any,
+) -> dict[str, Any]:
     return datasheet_batch_parse(
-        params.get("items"),
-        project_root=str(params.get("project_root", "")),
-        max_workers=int(params.get("max_workers", 8) or 8),
-        batch_size=int(params.get("batch_size", 50) or 50),
-        budget_s=float(params.get("budget_s", 800.0) or 800.0),
+        items,
+        project_root=str(project_root or ""),
+        max_workers=int(max_workers or 8),
+        batch_size=int(batch_size or 50),
+        budget_s=float(budget_s or 800.0),
     )
 
 
@@ -312,6 +333,7 @@ class DatasheetBatchToolPlugin:
                         "project_root": {"type": "string", "description": "项目根（账本落盘）"},
                         "max_workers": {"type": "integer", "default": 8, "description": "并发度"},
                         "batch_size": {"type": "integer", "default": 50, "description": "单次处理上限（续跑）"},
+                        "budget_s": {"type": "number", "default": 800.0, "description": "软预算秒（超时主动收尾，剩余留待续跑）"},
                     },
                     "required": ["items"],
                 },

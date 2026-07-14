@@ -79,10 +79,34 @@ def _run_demo(items: list[dict[str, str]], project_root: Path, max_workers: int)
     return 0 if res["completed"] > 0 else 1
 
 
+def _stage_items_into_project(items: list[dict[str, str]], project_root: Path) -> list[dict[str, str]]:
+    """把样例 datasheet 落入 project_root/upload/（SDK 沙箱允许的输入目录）。
+
+    SDK 路径安全校验只放行 project_root 内的路径，样例默认在 sample_dir（沙箱外）。
+    真实生产里用户上传的 datasheet 也落在 upload/，此处贴合该形态：复制后给 agent
+    传项目内相对路径 upload/<file>，agent 才能真正读到并解析。
+    """
+    import shutil
+
+    upload = project_root / "upload"
+    upload.mkdir(parents=True, exist_ok=True)
+    staged: list[dict[str, str]] = []
+    for it in items:
+        src = Path(it["path"])
+        dst = upload / src.name
+        with contextlib.suppress(Exception):
+            shutil.copyfile(src, dst)
+        staged.append({"model": it["model"], "path": f"upload/{src.name}"})
+    return staged
+
+
 def _run_agent(items: list[dict[str, str]], project_root: Path, output_dir: Path,
                api_key: str, args: argparse.Namespace) -> int:
     """Agent 路径：交给 Krow agent 用 datasheet_batch ACT 并发处理。"""
     from krow_agent_sdk import AgentBuilder
+
+    # 把样例落入 project_root/upload/ 并改写为项目内相对路径（沙箱约定）。
+    items = _stage_items_into_project(items, project_root)
 
     builder = (
         AgentBuilder()
@@ -100,10 +124,14 @@ def _run_agent(items: list[dict[str, str]], project_root: Path, output_dir: Path
     agent = builder.build()
     manifest = json.dumps(items, ensure_ascii=False)
     task = (
-        "请批量并发解析以下 datasheet 清单，抽取每份的规格字段，"
-        "并汇总覆盖情况（完成/失败/降级）。若有剩余未处理请续跑至全部完成，"
-        "最后把 per-item 结果与覆盖报告落盘。\n"
-        f"清单（JSON [{{model, path}}]）：{manifest}"
+        "批量并发解析下方 datasheet 清单（清单已直接给出，**无需搜索文件系统**）。\n"
+        "第一步动作就调 datasheet_batch_parse：\n"
+        f"  datasheet_batch_parse(items={manifest}, "
+        f"project_root=\"{project_root}\", max_workers=8)\n"
+        "然后读返回的 completed/failed/degraded/coverage/remaining/should_continue，"
+        "若 should_continue=true 用相同 items 续跑至 remaining=0；"
+        "最后把 per-item 结果写 output/datasheet_results.json、"
+        "覆盖报告写 output/datasheet_batch_report.md。"
     )
     print("🤖 Agent 路径：交给 Krow agent（datasheet_batch ACT）并发处理…")
     result = agent.run(task, task_context={"act_name": "datasheet_batch"})

@@ -22,9 +22,14 @@
 
 ## 标准工作流
 
-1. **组织清单**：从用户输入 / 目录读出待解析 datasheet，组成 `[{model, path}]`。
-2. **并发解析**：`datasheet_batch_parse(items=[...], project_root=<项目根>, max_workers=8)`
+1. **组织清单**：清单通常**已在任务输入里以 JSON manifest 直接给出**（形如
+   `[{"model","path"}]`）——**直接使用它**，不要去文件系统 `search_files` / `list_dir`
+   找 datasheet（样例已随任务下发，搜索只会白跑）。仅当任务未给清单、只给目录时，
+   才需列目录组织清单。
+2. **并发解析（第一步动作）**：拿到清单**立即**调
+   `datasheet_batch_parse(items=[...], project_root=<项目根>, max_workers=8)`
    → 拿 `completed/failed/degraded/coverage/remaining/should_continue/results`。
+   路径用任务给的原样（通常是项目内相对路径，如 `upload/xxx.txt`）。
 3. **续跑（如需）**：`should_continue=true` → 用相同 items 再调 `datasheet_batch_parse`，
    直到 `remaining=0`。
 4. **判定 + 处置**：覆盖率达标（gate ALLOW）→ 进入收尾；否则看 `results[].error`
