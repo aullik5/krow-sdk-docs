@@ -16,8 +16,9 @@
 | 4 | **contract-auditor** | [`contract-auditor/`](./contract-auditor/) | 合同审阅（强阻断 Gate + OpenTelemetry tracing） | ⭐⭐⭐⭐ | 6 类 plugin 全用（含 ObservabilityPlugin OpenTelemetry） |
 | 5 | **knowledge-wiki** | [`knowledge-wiki/`](./knowledge-wiki/) | 一批资料 → 结构化知识库（本体 Ontology + 可浏览互链百科词条 wiki） | ⭐⭐⭐⭐ | ToolPlugin × 5（扫描 / 抽取 / 关系 / 物化 / 覆盖核对）· ACTPlugin · GatePlugin（WikiCoverageGate 防"假编译"）· EventListenerPlugin（三阶段进度）+ BudgetSpec |
 | 6 | **hitl-assistant** | [`hitl-assistant/`](./hitl-assistant/) | CAD/仿真参数变更助手（Agent 中途停下来问工程师 → 答复可带截图 → 断点续跑） | ⭐⭐ | **HITL 全 API**（`with_hitl` 强制确认门 / `request_human_input` LLM 自主发问 / `agent.resume` 多模态续跑 / durable checkpoint 跨进程恢复 / 断点管理；需 `krow-agent-sdk >= 0.9.0.5`）· ToolPlugin · ACTPlugin |
+| 7 | **datasheet-batch** | [`datasheet-batch/`](./datasheet-batch/) | 批量并发解析一批元器件 datasheet（建库）→ per-item 结构化规格 + 覆盖报告 | ⭐⭐ | **生产 agent 认知回路内并发批处理**：per-item 身份归属 / 单份失败隔离 / 覆盖可判定（N 中完成 M / 失败 K）/ 大批量分块续跑 · ToolPlugin（parse_one / batch_parse）· 覆盖守门 GatePlugin · ACTPlugin · 零 LLM 确定性演示（`python main.py --demo`；需 `krow-agent-sdk >= 0.9.0.51`）|
 
-> 5 个 cookbook 共演示 SDK 全部 6 类 production plugin（ACTPlugin / ToolPlugin / HintPlugin / GatePlugin / EventListenerPlugin / ObservabilityPlugin）+ BudgetSpec 预算硬约束。knowledge-wiki 额外演示 **System 1 确定性流水线编排 + System 2 单发 LLM**：知识编译走"扫描 → 逐文件抽取 → 关系推断 → wiki 物化 → 覆盖验收"五步确定性流程，而非易空转的巨型 macro-ReACT。
+> 前 6 个 cookbook 共演示 SDK 全部 6 类 production plugin（ACTPlugin / ToolPlugin / HintPlugin / GatePlugin / EventListenerPlugin / ObservabilityPlugin）+ BudgetSpec 预算硬约束。knowledge-wiki 额外演示 **System 1 确定性流水线编排 + System 2 单发 LLM**：知识编译走"扫描 → 逐文件抽取 → 关系推断 → wiki 物化 → 覆盖验收"五步确定性流程，而非易空转的巨型 macro-ReACT。第 7 个 **datasheet-batch** 演示**生产 agent 认知回路内的并发批处理**——把「批量解析一批 datasheet」交给 agent，同时保证并行吞吐 / per-item 身份归属（A 的规格绝不串到 B）/ 单份失败隔离 / 覆盖可判定 / 大批量续跑；支持 `python main.py --demo` 零 LLM 确定性演示。
 
 ---
 
