@@ -1,0 +1,5 @@
+%%%% BINARY GARBAGE / SCAN FAILED %%%%
+xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Intentionally corrupted datasheet with no recognizable standard spec
+fields, to demonstrate N3 per-item failure isolation: it is recorded as
+failed on its own without dragging down the rest of the batch.

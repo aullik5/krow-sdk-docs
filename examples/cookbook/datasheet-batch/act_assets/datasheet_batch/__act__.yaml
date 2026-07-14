@@ -1,0 +1,20 @@
+name: datasheet_batch
+display_name: Datasheet 批量并发解析（Datasheet Batch）
+description: |
+  当用户要「批量解析 / 批处理一批 datasheet / 元器件规格书 / spec PDF」，或给一批
+  型号+文件要并发抽取结构化规格并汇总覆盖情况时进入此 ACT。
+  本 ACT 内 Agent 会：
+  - 组织待解析清单 [{model, path}]（每份型号 = 确定性身份）
+  - 调 datasheet_batch_parse 一次并发解析整批（复用主仓通用并发编排器）
+  - 读覆盖报告（N 中完成 M / 失败 K / 降级 L），在 DatasheetBatchCoverageGate
+    守门下判定是否达标；剩余未处理（大批量）则续跑
+  - 汇总落盘 per-item 结果 + 覆盖报告
+when_to_enter:
+  - "用户提到 批量 / 批处理 datasheet / 规格书 / spec / 数据手册 解析"
+  - "用户给一批元器件型号 + 文件要并发抽取规格字段"
+  - "用户提到 建库 / 全量回归 一批 datasheet"
+tools:
+  - datasheet_parse_one
+  - datasheet_batch_parse
+  - smart_file_write
+priority: 10

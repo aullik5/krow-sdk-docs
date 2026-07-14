@@ -1,0 +1,12 @@
+MICROCONTROLLER DATASHEET
+=========================
+
+Part Number: MCU-STM32F103C8T6
+Manufacturer: STMicroelectronics
+Package: LQFP48
+Operating Voltage: 2.0V to 3.6V
+Operating Temperature: -40C to +85C
+Core: ARM Cortex-M3 @ 72MHz
+Flash: 64 KB
+
+Description: Mainstream 32-bit MCU.

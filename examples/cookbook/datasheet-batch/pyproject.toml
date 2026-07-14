@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-datasheet-batch"
+version = "0.1.0"
+description = "Krow SDK Cookbook · Datasheet 批量并发解析 demo（复用通用并发编排器，per-item 归属/失败隔离/覆盖可判定/续跑，模拟 KAD 场景）"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "krow-agent-sdk>=0.9.0.50",
+    # 解析走 stdlib re —— 无额外依赖（真实场景把 parse 换成 VLM/PDF 解析）
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "datasheet_batch_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "datasheet_batch_plugin.py",
+    "main.py",
+    "act_assets/**",
+    "sample_data/**",
+    "README.md",
+    "tests/**",
+    "pyproject.toml",
+    ".gitignore",
+]

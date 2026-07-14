@@ -1,0 +1,12 @@
+MULTILAYER CERAMIC CAPACITOR DATASHEET
+=======================================
+
+Part Number: CAP-0603-100NF
+Manufacturer: Murata
+Package: 0603 (1608 Metric)
+Operating Voltage: 25V
+Operating Temperature: -55C to +125C
+Capacitance: 100 nF +/-10%
+Dielectric: X7R
+
+Description: General purpose MLCC. RoHS compliant.

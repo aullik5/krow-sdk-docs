@@ -1,0 +1,12 @@
+CHIP RESISTOR DATASHEET
+========================
+
+Part Number: RES-0402-10K
+Manufacturer: Yageo
+Package: 0402 (1005 Metric)
+Operating Voltage: 50V
+Operating Temperature: -55C to +155C
+Resistance: 10 kOhm +/-1%
+Power Rating: 0.063W
+
+Description: Thick film chip resistor. RoHS compliant.

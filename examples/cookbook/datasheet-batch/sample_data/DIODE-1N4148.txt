@@ -1,0 +1,11 @@
+SWITCHING DIODE DATASHEET
+=========================
+
+Part Number: DIODE-1N4148
+Manufacturer: onsemi
+Package: SOD-123
+Operating Voltage: 100V
+Operating Temperature: -65C to +175C
+Forward Current: 300 mA
+
+Description: High-speed switching diode.
