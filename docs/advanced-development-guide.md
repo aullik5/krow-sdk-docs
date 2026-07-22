@@ -1987,7 +1987,7 @@ class DownloadCompletenessContributor:
 
 **四条铁律**（违反任何一条 = 埋雷）：
 
-1. **error_vector 必须有 ground-truth 背书**——只注册"有真值可校准"的分量（来自 gate / 校验器 / 真机 journey）。**禁止**把 LLM 自评分、启发式估算当 error_vector（噪声会让停滞判定假阳/假阴）。没真值就只放进 `signals`，别放 error_vector。
+1. **error_vector 必须有 ground-truth 背书**——只注册"有真值可校准"的分量（来自 gate / 校验器 / 真机 journey）。**禁止**把 LLM 自评分、启发式估算当 error_vector（噪声会让停滞判定假阳/假阴）。没真值就只放进 `signals`，别放 error_vector。⚠️ 这条铁律**只约束 error_vector 与 L0 触发器**（自主级 C）——`signals` 与 warning-only/L2 触发器**不要求** ground-truth，可**提前预判注册**（三级准入详见 §10.8）。
 2. **`applicable()` 要收窄**——只在探测到活跃领域信号时返 True。恒真却零产出 = "传感器失活"假象，会拖累核心 dead-sensor 自检。
 3. **System-1 确定性 + fail-soft**——contributor 是纯读、零 LLM、零副作用；任何异常返 `{}`（绝不抛，态势装配不能被单个 contributor 拖垮）。
 4. **复用工具返回值 SSOT，不新造账本**——从 executor 已有的 `_step_results` / 工具 output 读计数，别自己在 executor 上挂新状态。
@@ -2065,6 +2065,22 @@ litsci 是"基于 SDK 开发、独立配置三注册表"的活例子（源码 `p
 | **唤醒风暴** | 同一条件每拍唤醒 → 淹没真信号 | 每形态每任务 `self._fired` 一次 + 靠 signals 键天然门禁 |
 | **传感器失活假阳** | `applicable` 恒真却零产出 → 拖累 dead-sensor 自检 | `applicable` 收窄到"有活跃领域信号"才 True |
 | **在 executor 上挂新账本** | 自造 pipeline 状态 → 与工具 output SSOT 漂移 | 复用工具返回值 / `_step_results`，不新造 |
+
+### 10.8 三级准入 A/B/C：ground-truth 铁律不是"一刀切"（2026-07-23）
+
+> 设计 SSOT：。
+
+早期为防"Goodhart 假信号"，我们对**所有**注册内容一律要求"先有 lessons/铁证"。实践证明这**过谨慎**——它把"观测"与"自主行动"混为一谈，导致新任务族要等出事才能享受决策脑。现改为**按准入等级分档**：门槛与"决策脑据此做多大的自主动作"挂钩，越自主越严。
+
+| 准入级 | 覆盖内容 | ground-truth 要求 | 何时可注册 |
+|---|---|---|---|
+| **A 观测级** | `signals`（任意事实明细）+ `warning-only` 触发器（只 emit 事件/日志，不改动作） | **无**——鼓励**提前预判**注册 | 随时；只要"想看见"就注册 |
+| **B 咨询级（L2）** | L2 advisory 触发器（会注入决策请求块、影响 LLM，但软预算/L1 在效期内让位） | **观测到模式**（如 nightly journey 复现 N 次、或有明确因果假设） | 有可复现的观测证据后 |
+| **C 自主级（L0 / error_vector）** | `error_vector` 分量 + `l0_event` 触发器（进停滞/信用结算、软预算耗尽仍生效） | **强 ground-truth**（gate / 校验器 / 真机 journey 真值背书） | 有真值可校准后（原铁律不变） |
+
+**判定口诀**：**越自主，门槛越高**。只想"看见"→ A 级（随便注册，进 `signals`）；想"提醒 LLM"→ B 级（要有观测证据）；想让系统"据此自动停滞判定/记信用"→ C 级（必须真值背书）。这样**所有任务族都能立刻用 A 级把领域信号接进来**（提前预判），而 C 级仍严防 Goodhart。
+
+**正/中性反馈（signed salience）**：决策脑不再只对"故障"（负向）反应——核心已内建**正半轴**（`pace_ahead` 进度显著领先预算 / `early_convergence` 已达标而预算有余）与**中性半轴**（`context_shift` 出现计划未预期的新缺口维度）触发器，对应新动作 **conclude 提前落袋** 与 **deepen 机会性深化**。这些是 domain-neutral 核心能力，**你无需注册即自动享受**；你只需按上表把领域 `signals` 喂进快照，正向触发器会读通用派生信号（progress/burn/quality_deficit）自动工作。三重阻尼防 scope creep：正向唤醒走**独立子配额**（永不挤占负向/L0）、**一次性**、`deepen` 仅在交付规格留有质量余量（`quality_headroom` 信号）时才渲染且**严禁扩展用户未要求的范围**。
 
 ---
 
