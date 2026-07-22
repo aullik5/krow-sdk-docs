@@ -67,6 +67,7 @@
   - [§9.3 `visual` — VisualAdapter 与 visual_inspect](#93-visual--visualadapter-与-visual_inspect)
   - [§9.4 `lifecycle` — 生命周期 hook](#94-lifecycle--生命周期-hook)
   - [§9.5 `extended_md_supplement_registry` — ACT 扩展 markdown](#95-extended_md_supplement_registry--act-扩展-markdown)
+  - [§9.6 `metacognition` — 配置决策脑三注册表](#96-metacognition--配置决策脑三注册表)
 - [§10. Telemetry 反向遥测](#10-telemetry-反向遥测)
 - [§11. Test SDK — 开发者写 plugin 的测试工具](#11-test-sdk--开发者写-plugin-的测试工具)
 - [§12. Errors — 错误层与黄金模板](#12-errors--错误层与黄金模板)
@@ -89,7 +90,7 @@
 
 | Level | API 范围 | 修改语义 |
 |---|---|---|
-| **Stable** | `AgentBuilder` 主链 / `Agent.run` / `BudgetSpec` / 6 个 stable Plugin Protocols / `EventBusReader` / `StreamItem` / 错误类 / `auth` / `llm` / `data` / `diagnostics` 公开函数 | breaking 变更必须 MAJOR bump + 提前 1 release deprecation 警告 |
+| **Stable** | `AgentBuilder` 主链 / `Agent.run` / `BudgetSpec` / 6 个 stable Plugin Protocols / `EventBusReader` / `StreamItem` / 错误类 / `auth` / `llm` / `data` / `diagnostics` / `metacognition` 公开函数 | breaking 变更必须 MAJOR bump + 提前 1 release deprecation 警告 |
 | **⚠️ Experimental** | `mcp_server` / `security` / `domain_pack` / `visual_adapter` Plugin 协议、`HttpGatewaySpec`、Wave 4 `test_sdk`、telemetry | 无 breaking 通知；可在 MINOR 版本删除 / 改名（详 §14） |
 | **Internal** | 模块名以 `_` 开头（`_plugin_id_validator`、`_protocol_validator`、`_vendor`） | 不在公开 API；任何 release 都可改 |
 
@@ -2467,6 +2468,45 @@ from krow_agent_sdk import extended_md_supplement_registry
 |---|---|
 | 单 plugin 单 target ACT supplement | 4 KB |
 | 整个进程内 supplement 累计 | 16 KB |
+
+---
+
+### §9.6 `metacognition` — 配置决策脑三注册表
+
+```python
+from krow_agent_sdk import (
+    register_situation_contributor,
+    register_wake_trigger,
+    register_decision_classifier,
+    get_registry_snapshot,
+)
+# 或：from krow_agent_sdk.metacognition import register_situation_contributor
+```
+
+Krow 的 macro 编排是元认知**决策脑**（GWT 全局工作站）：所有观测进工作站 → **稀疏**唤醒 → 注意力广播 → LLM 决策 → 信用回喂。它的领域扩展点是**三注册表**——把你自己垂直功能（如文献检索、报告生成）的**完整度信号**接进来，决策脑才能对你的任务"看得见、叫得醒、算得清"。
+
+| 函数 | 签名 | 用途 |
+|---|---|---|
+| `register_situation_contributor(target)` | `(type\|callable\|str) -> str` | **观测层**：登记 SituationContributor（`applicable()`+`__call__()->{"error_vector","signals"}`） |
+| `register_wake_trigger(target)` | `(callable\|str) -> str` | **唤醒层**：登记 WakeTrigger（`(prev,curr,delta,ledger)->str\|None`） |
+| `register_decision_classifier(target)` | `(callable\|str) -> str` | **结算层**：登记 DecisionClassifier（`(action,snap,ledger)->str\|None`） |
+| `get_registry_snapshot()` | `() -> dict` | 只读：三注册表已登记内容 + 计数（debug"我的 contributor 注册上了吗"） |
+
+**入参**：可传**类/函数对象**（facade 自动推导 FQCN 并**校验可 re-import**）或 **FQCN 字符串** `pkg.mod:Symbol`。返回实际登记的 FQCN。
+
+**三层契约**：
+
+| 层 | 你实现 | 返回 |
+|---|---|---|
+| Contributor | `applicable(executor)->bool` + `__call__(executor)->dict` | `{"error_vector": {名: 0~1 距离}, "signals": {名: 值}}`（两键均可选） |
+| WakeTrigger | `(prev, curr, delta, ledger)->str\|None` | 命中返唤醒事由字符串；否则 `None`。设 `fn.l0_event=True` 让它在软预算耗尽后仍能唤醒（完整度红线） |
+| DecisionClassifier | `(action, snap, ledger)->str\|None` | 把 LLM 揭示的动作归类（信用回喂）；未命中 `None` 回落核心矩阵 |
+
+**fail-loud 守门**（挡"注册≠激活"半边墙）：三者都必须是**模块顶层**类/函数——决策脑按 FQCN re-import 实例化，本地类 / lambda / 嵌套类在加载期只会被 silent 跳过。本 facade 在**注册期**就对不可 re-import 的 target `raise ValueError`。
+
+**可观测**：决策脑运行时 emit `cognitive.situation` / `cognitive.decision_wake` / `cognitive.decision_feedback` 事件（SDK 默认订阅，见 [§6.3](#63-稳定-topic-速查)）。
+
+完整实战（观测层 error_vector 设计、稀疏唤醒纪律、L0/L1/L2 权威阶梯、反模式）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §10「配置决策脑三注册表」+ cookbook `examples/cookbook/litsci-metacog/`。
 
 ---
 

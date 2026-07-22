@@ -1933,6 +1933,141 @@ for lesson in snap["lessons"]:
 
 ---
 
+## §10 配置决策脑三注册表（让决策脑对你的任务"看得见、叫得醒、算得清"）
+
+> 这一篇解决一个具体问题：**你基于 SDK 开发了一个垂直功能（文献检索、报告生成、代码审查…），但决策脑对你的任务族"全盲"——它不知道你离交付还差多少、也不知道你什么时候卡住了。** 本章教你用三注册表把领域完整度信号接进决策脑。litsci（文献检索）就是靠这套把"检索到 91 篇却零下载空转 17 分钟"这类事故变得可被决策脑察觉的。
+
+### 10.1 先搞清：决策脑是什么，三注册表在其中的位置
+
+Krow 的 macro 编排不是"规划→执行→再规划"的死循环，而是一个元认知**决策脑**，架构对齐认知科学的 **GWT（全局工作站理论）**：
+
+```
+① 观测（每拍）        ② 稀疏唤醒            ③ 广播 + 决策         ④ 信用回喂
+Contributor 写快照 → WakeTrigger 判定 →  注入决策请求块 → LLM →  Classifier 归类 → 结算 Δ
+（离验收多远？）      （现在该惊动吗？）     （揭示决策，非命令）      （这次决策有用吗？）
+```
+
+关键在**稀疏**：决策脑不是每拍都惊动 LLM（那样又慢又贵），而是平时静默观测，只在"该管"的时候点亮工作站、把注意力广播给 LLM。三注册表就是这套机制的**领域扩展点**（OCP：核心引擎领域无关，你按 FQCN 自注册，不改核心）：
+
+| 注册表 | GWT 角色 | 你注册什么 | 契约 |
+|---|---|---|---|
+| **SituationContributor** | 观测层 | 把领域状态写进工作站 | `applicable(exe)->bool` + `__call__(exe)->{"error_vector":{...},"signals":{...}}` |
+| **WakeTrigger** | 唤醒层 | 决定何时点亮工作站 | `(prev,curr,delta,ledger)->str\|None`（命中返事由） |
+| **DecisionClassifier** | 结算层 | 把 LLM 动作归类做信用回喂 | `(action,snap,ledger)->str\|None` |
+
+**核心已内建 10 个 domain-neutral 触发器**（gate 阻断 / 停滞 / 目标停滞 / 恶化 / 工具连败 / loop 迭代未达标 / progressive modify 空转…），**跨所有任务族免费生效**。你通常**只需补观测层 contributor**（把领域信号变成 error_vector），停滞/恶化就自动被核心触发器捕获——很多时候连自定义 trigger 都不用写。
+
+### 10.2 观测层：error_vector vs signals（最重要的一层）
+
+一个 contributor 返回两类数据，语义完全不同，别混：
+
+| 键 | 语义 | 谁用 | 值域 |
+|---|---|---|---|
+| `error_vector` | **离验收的距离**（0=完美，1=最差） | 核心 `_trigger_stall`/`_trigger_worsening` 判"持续不降/在变差" | 每个分量 0~1 |
+| `signals` | **观测明细**（任意事实） | 你自己的 WakeTrigger 做语义判定 + 事件可观测 | 任意 |
+
+```python
+class DownloadCompletenessContributor:
+    """把'下载完整度'接进决策脑（域自判门禁 + error_vector + signals）。"""
+
+    def applicable(self, executor) -> bool:
+        # ⚠️ 收窄：只在有活跃下载信号时才 True——否则简单任务会误报"传感器失活"
+        return self._download_requested(executor) > 0
+
+    def __call__(self, executor) -> dict:
+        requested = self._download_requested(executor)
+        failed = self._download_failed(executor)
+        if requested <= 0:
+            return {}                                   # fail-soft：无信号返空
+        return {
+            "error_vector": {"download_gap": round(failed / requested, 4)},
+            "signals": {"dl_requested": requested, "dl_failed": failed},
+        }
+```
+
+**四条铁律**（违反任何一条 = 埋雷）：
+
+1. **error_vector 必须有 ground-truth 背书**——只注册"有真值可校准"的分量（来自 gate / 校验器 / 真机 journey）。**禁止**把 LLM 自评分、启发式估算当 error_vector（噪声会让停滞判定假阳/假阴）。没真值就只放进 `signals`，别放 error_vector。
+2. **`applicable()` 要收窄**——只在探测到活跃领域信号时返 True。恒真却零产出 = "传感器失活"假象，会拖累核心 dead-sensor 自检。
+3. **System-1 确定性 + fail-soft**——contributor 是纯读、零 LLM、零副作用；任何异常返 `{}`（绝不抛，态势装配不能被单个 contributor 拖垮）。
+4. **复用工具返回值 SSOT，不新造账本**——从 executor 已有的 `_step_results` / 工具 output 读计数，别自己在 executor 上挂新状态。
+
+### 10.3 唤醒层：稀疏，不是越多越好
+
+WakeTrigger 是 System-1 纯谓词。写它的唯一目的是**在核心 10 个触发器覆盖不到的领域专属场景**补一刀。纪律：
+
+- **每形态每任务只唤醒一次**（`self._fired` 标志）——同一条件每拍重复唤醒 = 唤醒风暴，会淹没真正的信号。
+- **门禁靠 signals 天然隔离**：非本领域任务的 snapshot 里没有你的 signal 键，trigger 自然返 None，不需要额外 if。
+- **完整度红线用 `l0_event`**：默认软预算耗尽后触发器一律让位（让任务收尾）。若你的场景是"缺一页/漏一批就算失败"的完整度红线，给触发器设 `fn.l0_event = True`，它在软预算耗尽后仍能唤醒（`§0.0 完整性 > 速度`）。
+
+```python
+def wake_zero_download_with_hits(prev, curr, delta, ledger) -> str | None:
+    """检索有果却零下载 → 唤醒（L2 advisory · 每任务一次靠调用方去重）。"""
+    sig = curr.signals
+    hits, dl = sig.get("papers_found"), sig.get("dl_downloaded")
+    if isinstance(hits, int) and hits >= 3 and dl == 0:
+        return f"zero_download:检索到{hits}篇却零下载——放宽约束或诚实转交付元数据"
+    return None
+```
+
+### 10.4 权威阶梯 L0/L1/L2（为什么你的 trigger 有时"被让位"）
+
+决策脑与 System-1 反射共存，靠三级权威避免打架（幂等）：
+
+| 级 | 谁 | 例子 | 能否被软预算/让位 |
+|---|---|---|---|
+| **L0** | 安全/记账/完整度红线 | 预算硬顶、gate BLOCK、loop 迭代未达标 | 不可协商（软预算耗尽仍生效） |
+| **L1** | 决策脑语义决策 | replan / conclude / converge | 权威最高的"决定" |
+| **L2** | advisory 反射 | 大多数领域停滞提醒 | 软预算耗尽即让位；L1 在效期内也让位 |
+
+你写的普通领域 trigger 默认是 **L2**：当 LLM 刚拍了 replan/conclude/converge，你的反射会**自动让位**（不会去注一个和刚拍板动作打架的"补做步"）。这是 SDK 内建的幂等保护，你无需关心实现，只需知道：**想让信号在收尾阶段也一定被听见，就升 L0（`l0_event`）；否则默认 L2 足够。**
+
+### 10.5 怎么注册（SDK 公开 API）
+
+```python
+from krow_agent_sdk.metacognition import (
+    register_situation_contributor,
+    register_wake_trigger,
+    register_decision_classifier,
+    get_registry_snapshot,
+)
+
+# 传类/函数对象即可（facade 自动推导并校验 FQCN 可 re-import）
+register_situation_contributor(DownloadCompletenessContributor)
+register_wake_trigger(wake_zero_download_with_hits)
+
+# debug：确认注册上了
+snap = get_registry_snapshot()
+assert any("DownloadCompletenessContributor" in c for c in snap["contributors"])
+```
+
+**在哪调用**：进程启动早期一次即可（如你的 plugin 装配函数、或 app 启动脚本）。注册是**幂等**的。
+
+**注册≠激活**：注册只是让你的 contributor 进候选池；它是否对某个具体任务生效，取决于每拍的 `applicable(executor)` 判定。所以务必写单测走 `register → load → applicable → __call__` 全链路（见 §10.7）。
+
+### 10.6 真实范例：litsci 文献检索
+
+litsci 是"基于 SDK 开发、独立配置三注册表"的活例子（源码 `packages/krow-worker-litsci-plugin/krow_worker_litsci/litsci_situation_contributors.py`）：
+
+- **观测层** `LitsciPipelineContributor`：从 `litsci_download_pdf` 的 `counts` + `litsci_paper_search` 的 `papers` 读计数 → `error_vector.litsci_download_gap` + 检索/确认/下载 signals；
+- **唤醒层** `LitsciDownloadGapTrigger`（检索有果却零下载 / 下载失败率越阈）+ 复用核心停滞触发器覆盖 17 分钟空转；
+- **接线**：litsci worker boot 时调 `register_litsci_metacog()` 自注册（独立分发无 runtime 时静默跳过，不拖垮 boot）;
+- **可观测**：决策脑运行时 emit `cognitive.situation` / `cognitive.decision_wake` / `cognitive.decision_feedback`，SDK 默认订阅。
+
+> 完整可跑 demo：cookbook [`examples/cookbook/litsci-metacog/`](../../packages/krow-agent-sdk/examples/cookbook/litsci-metacog/)（自包含合成域，演示 contributor + trigger 注册 + 单测断言"注册≠激活"）。
+
+### 10.7 反模式黑名单（都有铁证）
+
+| 反模式 | 症状 | 解 |
+|---|---|---|
+| **"注册≠激活"半边墙** | 注册了但 `applicable` 恒 False / FQCN 不可 re-import → 加载期 silent 跳过 | facade 注册期已 fail-loud 挡不可 re-import；再写 `register→load→applicable` 单测闭环 |
+| **无 ground-truth 的 error_vector** | 把 LLM 自评/启发式当"离验收距离" → 停滞判定假阳假阴 | 只有真值背书的分量进 error_vector，其余进 signals |
+| **唤醒风暴** | 同一条件每拍唤醒 → 淹没真信号 | 每形态每任务 `self._fired` 一次 + 靠 signals 键天然门禁 |
+| **传感器失活假阳** | `applicable` 恒真却零产出 → 拖累 dead-sensor 自检 | `applicable` 收窄到"有活跃领域信号"才 True |
+| **在 executor 上挂新账本** | 自造 pipeline 状态 → 与工具 output SSOT 漂移 | 复用工具返回值 / `_step_results`，不新造 |
+
+---
+
 ## §11 多 Agent 轻量协同（A 层 persona + B 层 delegate · v0.9.0.31+）
 
 > 一篇指导：如何用 SDK 让多个 agent **分工协作**——给每个 agent 独立身份与行为准则，并让「组长」把子任务**派给**「组员」，而不是自己埋头干。
