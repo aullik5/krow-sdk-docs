@@ -17,7 +17,7 @@
 | 章节 | 主题 | 何时读 |
 |---|---|---|
 | §0 | 价值观（准确性 > 完整性 > 速度 > 成本） | 写代码前 |
-| §1 | TURBO 哲学（System 1 fast/syntax + System 2 slow/semantic） | 设计任何决策前 |
+| §1 | TURBO 哲学（两条总则：①语义/语法分工 System 1/System 2 + ②finished artifact 优先 + 近因效应锚定） | 设计任何决策前 |
 | §2 | Plugin 设计 5 大原则（SSOT / OCP / SRP / DRY / 复用） | 写 plugin 前 |
 | §3 | ToolPlugin 设计哲学（功能强大 + Agent 友好接口） | 写 ToolPlugin |
 | §4 | ACTPlugin / extended.md 编写最佳实践 | 写 ACTPlugin |
@@ -65,11 +65,19 @@
 
 ## §1 TURBO 哲学（**Krow Agent 的灵魂**）
 
-### 1.1 一句话总结
+### 1.1 一句话总结（**TURBO = 两条总则**）
 
-> **"语义交给 LLM、语法交给系统。"**
+TURBO 哲学由**两条总则**构成，未来你只需记住"TURBO 哲学"这一个概念即涵盖两条：
 
-### 1.2 双系统架构
+> **总则①（分工）："语义交给 LLM、语法交给系统。"**
+> 非确定性的语义 / 决策 / 创意 → LLM（System 2）；确定性需求 → System 1 工具 / 闸门。详 §1.2–§1.5。
+> **总则②（喂料）："给 LLM 成品，不给零件"（finished artifact 优先 + 近因效应锚定）。**
+> 给 LLM 的应是**可直接 COPY VERBATIM 的最终产物**（vendor 模板 / spec_lock SSOT / 完整片段），
+> 而不是一堆语法说明书让它自己拼；长链路关键步骤前用**近因效应**让 LLM 回顾 finished artifact 锚定方向，保证不偏移。详 §1.6。
+
+两条总则同源：都在**把 LLM 该做的留给 LLM、把 LLM 不必做的挪走**——总则①挪走确定性计算，总则②挪走"从零件拼装成品"的认知负担。反面统称 "Syntax 代偿 Semantic"（详 §1.9 反模式 D）。
+
+### 1.2 双系统架构（总则①）
 
 | 维度 | System 1（系统 / fast / syntax） | System 2（LLM / slow / semantic） |
 |---|---|---|
@@ -132,11 +140,13 @@ ToolPlugin 内部**绝不能** `import openai` / `import httpx` 调 LLM。这违
 **举例 3**：把 markdown 转 HTML → 确定性映射 → System 1（用 markdown 库）
 **举例 4**：写一个段落总结 → 创意生成 → System 2
 
-### 1.6 LLM-first 三件套（**Krow Agent 核心架构选择**）
+### 1.6 finished artifact 优先 = 总则② · LLM-first 三件套（**Krow Agent 核心架构选择**）
 
-> 来自 2026-05-25 ppt-master 700 行 vs PISMA-SVG 5万行补丁的元复盘。这是 TURBO 哲学的**实施层最佳实践**——写完整套 plugin 后回看这一节做对照检查。
+> 这是 §1.1 **总则②"给 LLM 成品，不给零件"的落地**。源自一次真实迁移的元复盘：某"用 700 行 finished artifact 输入"的实现，在最终视觉/语义质量上反而 **1.9–2.0×** 碾压了另一套"用 5 万行 python 补丁后处理"的实现——喂给 LLM 的是成品而非零件，模型的复用能力被真正释放。写完整套 plugin 后回看这一节做对照检查。
 
 **核心信念**：**LLM 能力在快速进步, 你的 plugin 代码量应在收缩, 而不是膨胀**.
+
+**为什么这是总则**：LLM 最擅长的是"看懂一个成品 → 照着改两笔产出新成品"（复用），最不擅长的是"从零件说明书 + 一堆散提示 → 自己拼装成品"（易漏、易偏、易返工）。总则② = 永远把前者喂给 LLM。
 
 #### 第 1 件: finished artifact 输入
 
@@ -190,6 +200,19 @@ your_plugin/
 LLM 流程: `tool_load_vendor(style="modern")` → 工具返回 `refs/style_modern.md` 完整 markdown → LLM 看完 COPY + 改文本/颜色锚定 `spec_lock.md`.
 
 **对照**: 不要写一个 `python_style_engine.py` 算法自动选风格 + 生成 — 这是 building blocks + syntax 代偿双反.
+
+#### 第 4 件: 近因效应锚定 (长链路关键步骤前回顾 finished artifact)
+
+LLM 注意力呈 U 型曲线——开头 (primacy) 和**结尾 (recency)** 最受重视，中段最易被稀释。长链路（多页生成 / 多步 ReACT / conclude 前）里，如果 finished artifact（vendor 模板 / spec_lock SSOT / 风格锚）只在**最开头**注入一次，跑到后面就会被中间大量上下文冲淡 → 方向漂移（配色跑偏 / 字号不一致 / 忘了品牌锚）。
+
+**做法**：在每个关键步骤**动作前**，把该步真正要遵守的 finished artifact 段**重新放到 prompt 近端**（结尾）让 LLM 现场回顾，而不是依赖它记住开头看过的东西。
+
+| ❌ 只在开头注入一次 | ✅ 关键步骤前 recency 回顾 |
+|---|---|
+| system prompt 开头贴 spec_lock，之后 20 页全靠 LLM"记住" | 每页渲染前把该页的 spec_lock 段重贴到 prompt 尾部 |
+| conclude 前不重申验收标准（DoD） | conclude 前把 DoD / 成品范例重贴到近端再让它自检 |
+
+**落地手段**：用 `HintPlugin` 的 `should_inject(task_context)` 做条件注入（按当前 step 分流，把对应 finished artifact 段放到高优先级/结尾段）；或用 `PromptPriority`（`CRITICAL` primacy + 结尾 recency，详 §11.2）控制物理顺序。**判定**：你的关键步骤是不是"LLM 现在就能看到它该 COPY 的那份成品"？还是"指望它记得 50 条消息之前看过"？
 
 ### 1.7 度量指标: syntax/semantic 比 (plugin 健康度)
 
