@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -190,6 +189,16 @@ def datasheet_batch_parse(
         dict 含 ok/summary/total/completed/failed/degraded/remaining/coverage/
         should_continue/results/ledger_path。results 每项 per-item 归属确定。
     """
+    # 输入校验与运行时环境无关，必须先于 orchestrator 可用性判定——否则无 runtime 环境
+    # （如 cookbook smoke CI 不装 runtime）下空输入会误报"编排器不可用"，掩盖真正的调用方错误.
+    norm = _coerce_items(items)
+    if not norm:
+        return _golden_error(
+            "items 为空",
+            where="datasheet_batch_parse(items=...)",
+            fixes=["传 [{'model','path'}] 或 datasheet 路径列表（≥1）"],
+        )
+
     if not _ORCHESTRATOR_AVAILABLE:
         return _golden_error(
             "并发编排器不可用（modules.agent.batch_orchestrator 未装）",
@@ -198,14 +207,6 @@ def datasheet_batch_parse(
                 "确认 krow-agent-sdk-runtime 已安装（krow-sdk-install --api-key ...）",
                 "本工具依赖 runtime 提供的 modules.* 通用编排基础设施",
             ],
-        )
-
-    norm = _coerce_items(items)
-    if not norm:
-        return _golden_error(
-            "items 为空",
-            where="datasheet_batch_parse(items=...)",
-            fixes=["传 [{'model','path'}] 或 datasheet 路径列表（≥1）"],
         )
 
     root = Path(project_root).resolve() if project_root else Path.cwd()
