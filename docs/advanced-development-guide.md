@@ -2033,6 +2033,26 @@ def wake_zero_download_with_hits(prev, curr, delta, ledger) -> str | None:
     return None
 ```
 
+**必标两个轴属性**（缺任一都会让你的触发器"喊了但没人接"）：
+
+| 属性 | 回答什么 | 取值 |
+|---|---|---|
+| `value_axis` | 这个信号**有多重要**（同拍多触发器命中时的裁决序） | `accuracy` / `completeness` / `speed` / `cost`（按 AGENTS.md §0.0 价值观字典序） |
+| `error_axis` | **谁来处置它**（轴 × 执行器满秩矩阵的对齐键） | 见下 |
+
+```python
+from krow_agent_sdk.metacognition import AXIS_PRIMARY_ERROR, AXIS_ADVISORY, CORE_AXES
+
+wake_zero_download_with_hits.value_axis = "completeness"
+wake_zero_download_with_hits.error_axis = AXIS_ADVISORY   # 处置由核心决策承接
+```
+
+`error_axis` 的三种诚实姿态（**不声明**不是第四种——那是欠账，满秩矩阵会点名说"无从校验"）：
+
+1. **复用核心轴**：问题能被核心决策处置就用核心轴常量（全集见 `CORE_AXES`）。误差向量类信号一律用符号轴 `AXIS_PRIMARY_ERROR`——它在运行时解析成当拍最痛的分量，`continue` / `replan` / `extend_budget` 都在推动它。
+2. **advisory**：你只是"值得看一眼"的提醒，处置由别的决策承接 → 标 `AXIS_ADVISORY`（`"-"`）。这是**显式**声明"我不要求专属执行器"，与"忘了写"区分开。
+3. **领域轴**：确实需要专属处置 → 自定轴名，并用 `modules.agent.progressive.decision_contract.register_decision_contract` 登记能处置它的决策。只加轴不加决策 = "只有传感器没有执行器"，铁证。
+
 ### 10.4 权威阶梯 L0/L1/L2（为什么你的 trigger 有时"被让位"）
 
 决策脑与 System-1 反射共存，靠三级权威避免打架（幂等）：
@@ -2088,6 +2108,8 @@ litsci 是"基于 SDK 开发、独立配置三注册表"的活例子（源码 `p
 | **唤醒风暴** | 同一条件每拍唤醒 → 淹没真信号 | 每形态每任务 `self._fired` 一次 + 靠 signals 键天然门禁 |
 | **传感器失活假阳** | `applicable` 恒真却零产出 → 拖累 dead-sensor 自检 | `applicable` 收窄到"有活跃领域信号"才 True |
 | **在 executor 上挂新账本** | 自造 pipeline 状态 → 与工具 output SSOT 漂移 | 复用工具返回值 / `_step_results`，不新造 |
+| **只有传感器没有执行器** | 触发器不声明 `error_axis` → 一直唤醒而系统不知道该拿它怎么办（满秩矩阵报"无从校验"） | 按 §10.3 三种姿态之一声明：核心轴 / `AXIS_ADVISORY` / 领域轴 + `register_decision_contract` |
+| **手打轴名字符串** | 轴名是"传感器 ↔ 执行器"对齐键，打错一个字母不报错，只让满秩矩阵静默缺一格 | 引用常量：`from krow_agent_sdk.metacognition import AXIS_PRIMARY_ERROR, CORE_AXES` |
 
 ### 10.8 三级准入 A/B/C：ground-truth 铁律不是"一刀切"（2026-07-23）
 

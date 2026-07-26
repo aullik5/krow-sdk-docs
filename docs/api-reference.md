@@ -2502,6 +2502,23 @@ Krow 的 macro 编排是元认知**决策脑**（GWT 全局工作站）：所有
 | WakeTrigger | `(prev, curr, delta, ledger)->str\|None` | 命中返唤醒事由字符串；否则 `None`。设 `fn.l0_event=True` 让它在软预算耗尽后仍能唤醒（完整度红线） |
 | DecisionClassifier | `(action, snap, ledger)->str\|None` | 把 LLM 揭示的动作归类（信用回喂）；未命中 `None` 回落核心矩阵 |
 
+**WakeTrigger 的两个轴属性**（`value_axis` 决定"有多重要"，`error_axis` 决定"谁来处置"）：
+
+```python
+from krow_agent_sdk.metacognition import AXIS_ADVISORY, AXIS_PRIMARY_ERROR, CORE_AXES
+
+my_trigger.value_axis = "completeness"      # accuracy | completeness | speed | cost
+my_trigger.error_axis = AXIS_PRIMARY_ERROR  # 或 AXIS_ADVISORY / 你的领域轴
+```
+
+| 常量 | 类型 | 含义 |
+|---|---|---|
+| `AXIS_PRIMARY_ERROR` | `str` = `"@primary_error"` | 符号轴：运行时解析成当拍误差向量最痛的分量（`continue`/`replan`/`extend_budget` 即其执行器） |
+| `AXIS_ADVISORY` | `str` = `"-"` | 显式声明"我不要求专属执行器"（处置由别的决策承接），与"忘了写"区分开 |
+| `CORE_AXES` | `frozenset[str]` | 核心观测轴全集（如 `budget_burn_ratio` / `deliverable_pending` / `tool_failure_streak`），用于复用核心执行器或自查轴名是否撞名 |
+
+不声明 `error_axis` **不是**第三种选项：满秩校验会点名"唤醒触发器未声明 error_axis（轴×执行器满秩矩阵无从校验）"，你的触发器会一直唤醒而系统不知道该拿它怎么办。用领域轴时必须同时登记能处置它的决策（`modules.agent.progressive.decision_contract.register_decision_contract`）。详见进阶指南 §10.3。
+
 **fail-loud 守门**（挡"注册≠激活"半边墙）：三者都必须是**模块顶层**类/函数——决策脑按 FQCN re-import 实例化，本地类 / lambda / 嵌套类在加载期只会被 silent 跳过。本 facade 在**注册期**就对不可 re-import 的 target `raise ValueError`。
 
 **可观测**：决策脑运行时 emit `cognitive.situation` / `cognitive.decision_wake` / `cognitive.decision_feedback` 事件（SDK 默认订阅，见 [§6.3](#63-稳定-topic-速查)）。
