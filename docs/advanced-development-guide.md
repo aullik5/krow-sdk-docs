@@ -1242,7 +1242,7 @@ from krow_agent_sdk import (
 | `.with_krow_api_key(key)` | 配 Krow API key |
 | `.with_project_root(path)` | 指定 agent 工作根目录 |
 | `.with_chat_model(name)` | 选 chat 模型（如 `"qwen3.6-plus"`） |
-| `.with_reasoning_model(name)` | 选 reasoning 模型（如 `"deepseek-reasoner"`） |
+| `.with_reasoning_model(name)` | 选 reasoning 模型（如 `"deepseek-v4-pro"`） |
 | `.with_vision_model(name)` | 选视觉理解模型 |
 | `.with_image_gen_model(name)` | 选图像生成模型 |
 | `.with_image_edit_model(name)` | 选图像编辑模型 |

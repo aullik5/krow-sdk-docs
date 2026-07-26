@@ -269,7 +269,7 @@ agent = AgentBuilder.from_config(cfg).build()
 | 方法 | 类别 | 典型 model_id | 用途 |
 |---|---|---|---|
 | `with_chat_model(model_id)` | `chat` | `qwen3.6-plus` / `deepseek-chat` | 通用对话 / 代码生成 / planner 主路径 |
-| `with_reasoning_model(model_id)` | `reasoning` | `deepseek-reasoner` | 深度推理 / 思维链 / replan / verify |
+| `with_reasoning_model(model_id)` | `reasoning` | `deepseek-v4-pro` | 深度推理 / 思维链 / replan / verify |
 | `with_vision_model(model_id)` | `vision` | `qwen2.5-vl-72b-instruct` | 视觉理解（visual_inspect / context_enhancer） |
 | `with_image_gen_model(model_id)` | `image_gen` | `qwen-image` | 图像生成 |
 | `with_image_edit_model(model_id)` | `image_edit` | `qwen-image-edit` | 图像编辑 |
@@ -281,7 +281,7 @@ agent = (
     .with_krow_api_key(os.environ["KROW_API_KEY"])
     .with_project_root("/data/x")
     .with_chat_model("qwen3.6-plus")
-    .with_reasoning_model("deepseek-reasoner")
+    .with_reasoning_model("deepseek-v4-pro")
     .with_vision_model("qwen2.5-vl-72b-instruct")
     .build()
 )

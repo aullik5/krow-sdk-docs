@@ -799,7 +799,7 @@ agent = (
     .with_project_root(project_root)
     # 6 类全部可选；未指定的 category 走 cloud-model fallback
     .with_chat_model("qwen3.6-plus")                      # 对话 / 通用 / 代码
-    .with_reasoning_model("deepseek-reasoner")            # 深度推理 / CoT
+    .with_reasoning_model("deepseek-v4-pro")              # 深度推理 / CoT
     .with_vision_model("qwen2.5-vl-72b-instruct")         # 视觉理解 (VLM)
     .with_image_gen_model("qwen-image")                   # 图像生成
     .with_image_edit_model("qwen-image-edit")             # 图像编辑
