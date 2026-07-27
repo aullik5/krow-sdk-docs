@@ -22,6 +22,15 @@ test = [
     "pytest-timeout>=2.2",
 ]
 
+# 自动发现（0.9.0.60+）：装上即被总线看见，不需要任何一方 import 本模块。
+# `register_*` 那条路仍然有效，但它有个容易漏的前提——得有人 import 你的模块；
+# 包装上了不等于被导入了，靠导入顺序碰运气会时灵时不灵，且失败时静默。
+[project.entry-points."krow.metacog.contributors"]
+litsci_download = "litsci_metacog_demo:DownloadCompletenessContributor"
+
+[project.entry-points."krow.metacog.wake_triggers"]
+litsci_zero_download = "litsci_metacog_demo:wake_zero_download_with_hits"
+
 [tool.hatch.build.targets.wheel]
 packages = ["."]
 include = [

@@ -1980,8 +1980,19 @@ for item in agent.run_stream("..."):
 | Budget | `budget.llm_call_recorded` | `total_calls` / `remaining` |
 | Budget | `budget.adapt_extension` | `extensions_used` |
 | Budget | `budget.exhausted` | `category` / `limit` |
+| 认知总线 | `cognitive.situation` | `beat` / `load_state` / `load_axis` / `error_vector` / `signals` |
+| 认知总线 | `cognitive.signal` | `axis` / `magnitude` / `valence` / `kind` / `source` |
+| 认知总线 | `cognitive.load` | `state` / `load_axis` / `degraded` + 各被控变量读数 |
+| 认知总线 | `cognitive.decision_wake` | `beat` / `reason` / `valence` / `wakes_used` / `soft_budget` / `competition` |
+| 认知总线 | `cognitive.decision_feedback` | `beat` / `delta` / `improved` / `worsened` / `decision` / `ineffective_streak` |
+| 认知总线 | `cognitive.decision_conflict` | `beat` / `pair` / `decision` / `delta` |
+| 认知总线 | `cognitive.actuated` | `decision` / `kind` / `authority` / `beat` / `fires` |
+| 认知总线 | `cognitive.sensor_dead` | `beat` / `sensor` / `applicable_beats` / `beats` / `errors` |
+| 慢环 | `self_evolution.proposal_ready` | `act_name` / `path` / `candidates` / `has_findings` |
+| 慢环 | `self_evolution.learning_snapshot` | `distilled` / `promoted` / `carried_in` / `injected` / `rooted` / `hypotheses` |
 
 > **铁律**：表中 topic 在 SemVer 内稳定。**其他 topic** 仍可订阅（EventBus 是开放的），但**不在 SemVer 稳定保证内** — 主仓 refactor 可能 break。
+> `cognitive.*` 的全量清单（含执行器面、上行监测面、内感受面共 20 条）SSOT 在 `modules/agent/progressive/cognitive_topics.py:COGNITIVE_TOPICS`；上表只列**稳定保证内**的那些。SDK `AgentBuilder` 默认订阅其中一个子集，见 §9.6。
 
 ---
 
@@ -2505,11 +2516,49 @@ Krow 的 macro 编排是元认知**决策脑**（GWT 全局工作站）：所有
 **WakeTrigger 的两个轴属性**（`value_axis` 决定"有多重要"，`error_axis` 决定"谁来处置"）：
 
 ```python
-from krow_agent_sdk.metacognition import AXIS_ADVISORY, AXIS_PRIMARY_ERROR, CORE_AXES
+from krow_agent_sdk.metacognition import (
+    AXIS_ADVISORY, AXIS_PRIMARY_ERROR, CORE_AXES,
+    VALUE_AXES, VALUE_AXIS_COMPLETENESS, wake_magnitude_from_ratio,
+)
 
-my_trigger.value_axis = "completeness"      # accuracy | completeness | speed | cost
-my_trigger.error_axis = AXIS_PRIMARY_ERROR  # 或 AXIS_ADVISORY / 你的领域轴
+my_trigger.value_axis = VALUE_AXIS_COMPLETENESS  # 从 VALUE_AXES 取，别手打字符串
+my_trigger.error_axis = AXIS_PRIMARY_ERROR       # 或 AXIS_ADVISORY / 你的领域轴
+
+
+def my_trigger(prev, curr, delta, ledger):
+    stuck = getattr(ledger, "beats_without_progress", 0)
+    if stuck < 8:
+        return None
+    # 返 (事由, 强度) 二元组即为自报强度；只返字符串则强度恒 1.0
+    return f"my_domain_stuck:{stuck}", wake_magnitude_from_ratio(stuck, 8)
 ```
+
+| 常量/函数 | 类型 | 说明 |
+|---|---|---|
+| `VALUE_AXES` | `frozenset[str]` | 合法价值轴全集 `{accuracy, completeness, speed, cost}`（另有 `VALUE_AXIS_*` 四个单值常量）。`value_axis` 写了表外的值 → **注册期 fail-loud**，不静默落默认值 |
+| `WAKE_MAGNITUDE_MAX` | `float` = `1.5` | 自报强度上界。有上界是刻意的：无上界时任一触发器返 `5.0` 就能永久霸占裁决 |
+| `wake_magnitude_from_ratio(observed, threshold)` | `(float, float) -> float` | 把"超阈多少倍"换算成合法强度（恰好达阈 = 1.0，超阈越多越大，饱和在上界）。**不要自己算 magnitude** —— 自己算意味着你得先读懂上界取值来历与截断语义，那是零件不是成品 |
+
+**不自报强度的代价**：强度缺省恒 1.0，而裁决按"价值轴权重 × 强度"排序 —— 一个恒 1.0 的域触发器在与自报强度的核心触发器同拍竞争时会**系统性垫底**（V1 修的正是这个：某域触发器连续 25 拍命中却一次没赢过裁决）。
+
+**零注册的感知通道**（`publish_signal_envelope`）：领域侧已经算出"离目标还差多少"时，不必写 contributor 类：
+
+```python
+from krow_agent_sdk.metacognition import publish_signal_envelope
+
+publish_signal_envelope("litsci.download_gap", 0.7, kind="pdf_missing", source="litsci")
+```
+
+| 参数 | 说明 |
+|---|---|
+| `axis` | 轴名，建议带域前缀。非法字符归一、超长截断、空 → `other` |
+| `magnitude` | `0..1` 强度（`neg` 语义下 = 离验收还差多少）。换算是**你的职责**（属领域语义），本函数只负责运输 |
+| `valence` | `neg`（默认，入误差向量参与 Δ/停滞/显著性竞争）/ `pos` / `neutral`（仅进 signals，不污染误差向量） |
+| `kind` / `source` | 可选细分与来源标识（建议填 `plugin_id`，便于 nightly 定位乱发方） |
+
+返回投递是否成功（**fail-soft**：总线不可用返 `False`，绝不抛）。护栏：同轴同拍取峰值、每拍轴种数与总量硬顶、非法包络丢弃并计数（丢弃账进结案 `metacog_decision_stats.envelope.ingress`，nightly 可见——零注册不等于零问责）。
+
+**什么时候用哪条**（治理决议"感知自动、决策注册"）：事件式、一次性、突发的信号（工具连败、下载缺口、配额告警）走包络；**每拍都要被询问**的聚合型传感器与**控制律**（wake trigger / classifier）走注册表——控制律的修改必须深思熟虑。
 
 | 常量 | 类型 | 含义 |
 |---|---|---|
@@ -2517,7 +2566,37 @@ my_trigger.error_axis = AXIS_PRIMARY_ERROR  # 或 AXIS_ADVISORY / 你的领域�
 | `AXIS_ADVISORY` | `str` = `"-"` | 显式声明"我不要求专属执行器"（处置由别的决策承接），与"忘了写"区分开 |
 | `CORE_AXES` | `frozenset[str]` | 核心观测轴全集（如 `budget_burn_ratio` / `deliverable_pending` / `tool_failure_streak`），用于复用核心执行器或自查轴名是否撞名 |
 
-不声明 `error_axis` **不是**第三种选项：满秩校验会点名"唤醒触发器未声明 error_axis（轴×执行器满秩矩阵无从校验）"，你的触发器会一直唤醒而系统不知道该拿它怎么办。用领域轴时必须同时登记能处置它的决策（`modules.agent.progressive.decision_contract.register_decision_contract`）。详见进阶指南 §10.3。
+不声明 `error_axis` **不是**第三种选项：满秩校验会点名"唤醒触发器未声明 error_axis（轴×执行器满秩矩阵无从校验）"，你的触发器会一直唤醒而系统不知道该拿它怎么办。
+
+**用你自己的领域轴**（2026-07-27 起，三条路都在你的包里完成，不必改 krow 核心表）：
+
+```python
+from krow_agent_sdk.metacognition import register_domain_axis, FAMILY_OUTPUT_CHANNEL
+
+# ① 登记领域轴（极性默认 worse_higher = 数值越大越差；预期结算按"下降 = 改善"判）
+register_domain_axis("my_extraction_gap")
+my_trigger.error_axis = "my_extraction_gap"
+# ② 指名处置它的决策（必须是真实存在且有执行器的决策，advisory/planned 不算）
+my_trigger.handled_by = ("replan", "converge")
+
+# 或 ③ 并入既有轴族，覆盖由族推导（族里已有决策能处置 → 新轴自动被覆盖）
+register_domain_axis("my_stream_glitch", family=FAMILY_OUTPUT_CHANNEL)
+```
+
+自建独族、改核心轴归属都会被拒——族一旦能自建就等于免检。若你的领域确实需要**自己的执行器**（而不是复用 `replan`/`converge`），走 `register_decision_contract` 登记一条带执行器与预期的契约。详见进阶指南 §10.3。
+
+**自动发现（推荐）**：把注册项写进你的包的 entry points，装上即被总线看见，**不需要**任何一方 import 你的模块：
+
+```toml
+# 你的 pyproject.toml
+[project.entry-points."krow.metacog.contributors"]
+my_sensor = "my_pkg.sensors:MyContributor"
+
+[project.entry-points."krow.metacog.wake_triggers"]
+my_trigger = "my_pkg.triggers:MyTrigger"
+```
+
+`register_situation_contributor` 那条路仍然有效，但它有个前提容易漏：**得有人 import 你的模块**。包装上了不等于被导入了，靠导入顺序碰运气会时灵时不灵，且失败时静默。entry point 把这一步交给包管理器。两条路径登记同一个 FQCN 时按字面量去重（只跑一遍）。
 
 **fail-loud 守门**（挡"注册≠激活"半边墙）：三者都必须是**模块顶层**类/函数——决策脑按 FQCN re-import 实例化，本地类 / lambda / 嵌套类在加载期只会被 silent 跳过。本 facade 在**注册期**就对不可 re-import 的 target `raise ValueError`。
 

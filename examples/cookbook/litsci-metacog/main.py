@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from litsci_metacog_demo import (
     DownloadCompletenessContributor,
     register,
+    report_download_gap,
     wake_zero_download_with_hits,
 )
 
@@ -69,7 +70,28 @@ def main() -> None:
     # 场景 C：非文献任务（无 paper_search / download_pdf）→ 不适用（天然门禁）。
     exe_c = _fake_executor(s1=_sr("write_output", {"path": "report.md"}))
     print("场景 C（非文献任务）：")
-    print(f"  applicable = {contributor.applicable(exe_c)}  ← 收窄，避免'传感器失活'假阳")
+    print(f"  applicable = {contributor.applicable(exe_c)}  ← 收窄，避免'传感器失活'假阳\n")
+
+    # 唤醒声明面：裁决按"价值轴权重 × 强度"排序。场景 A 与场景 D 的差别就是
+    # 强度——不自报的话两者都是 1.0，决策脑分不出"完整度归零"与"刚过阈"。
+    exe_d = _fake_executor(
+        s1=_sr("paper_search", {"papers": [{"id": i} for i in range(10)]}),
+        s2=_sr("download_pdf", {"counts": {"requested": 10, "downloaded": 4, "failed": 6}}),
+    )
+    snap_d = _snapshot(contributor, exe_d)
+    fired_d = wake_zero_download_with_hits(None, snap_d, {}, None)
+    print("唤醒声明面：")
+    print(f"  value_axis  = {wake_zero_download_with_hits.value_axis}")
+    print(f"  error_axis  = {wake_zero_download_with_hits.error_axis}")
+    print(f"  handled_by  = {wake_zero_download_with_hits.handled_by}")
+    fired_a = wake_zero_download_with_hits(None, snap_a, {}, None)
+    print(f"  强度（A 零下载）    = {fired_a[1] if fired_a else None}")
+    print(f"  强度（D 60% 失败）  = {fired_d[1] if fired_d else None}")
+    print("  ↑ 无 SDK 环境时两者都是 1.0（换算函数在 facade 里）")
+
+    # 零注册通道：突发信号直接发包络，不必写 contributor。
+    delivered = report_download_gap(failed=6, requested=10)
+    print(f"\n信号包络投递：{delivered}（无 runtime 时 fail-soft 返 False）")
 
 
 if __name__ == "__main__":

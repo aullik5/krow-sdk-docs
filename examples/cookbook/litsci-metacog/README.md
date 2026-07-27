@@ -43,11 +43,13 @@ pytest -q
 
 ```python
 from krow_agent_sdk.metacognition import (
+    register_domain_axis,
     register_situation_contributor,
     register_wake_trigger,
     get_registry_snapshot,
 )
 
+register_domain_axis("litsci_download_gap")                     # 领域轴：先登记极性
 register_situation_contributor(DownloadCompletenessContributor)  # 传类即可，自动校验可 re-import
 register_wake_trigger(wake_zero_download_with_hits)
 
@@ -55,6 +57,51 @@ print(get_registry_snapshot()["counts"])  # 确认注册上了
 ```
 
 进程启动早期注册一次即可（幂等）。之后 Agent 每个 macro 拍会自动采集你的信号。
+
+### 唤醒声明面：不写这三行，你的触发器会系统性输掉裁决
+
+裁决按 **价值轴权重 × 强度** 排序。域触发器若不声明轴、不自报强度，强度恒 1.0、价值轴落最低档——生产 litsci 曾出现某触发器连续 25 拍命中却一次没赢过。
+
+```python
+from krow_agent_sdk.metacognition import VALUE_AXIS_COMPLETENESS, wake_magnitude_from_ratio
+
+wake_zero_download_with_hits.value_axis = VALUE_AXIS_COMPLETENESS  # 争的是完整度不是准确性
+wake_zero_download_with_hits.error_axis = "litsci_download_gap"    # 谁的误差
+wake_zero_download_with_hits.handled_by = ("replan", "converge")   # 谁来处置（满秩校验查这条）
+
+def wake_zero_download_with_hits(prev, curr, delta, ledger):
+    ...
+    # 返二元组 = 自报强度。只返字符串 → 强度恒 1.0
+    return f"download_gap:{failed}/{requested} 下载失败", wake_magnitude_from_ratio(ratio, 0.5)
+```
+
+三条声明的分工：`value_axis` 答"有多重要"，`error_axis` 答"谁的误差"，`handled_by` 答"谁来处置"。缺最后一条会被满秩校验拒——一条轴报了误差却没有决策认领它，就是"传感器齐全但执行器不读"的开环。
+
+### 零注册的另一条路：信号包络
+
+事件式、一次性的信号不必写 contributor 类：
+
+```python
+from krow_agent_sdk.metacognition import publish_signal_envelope
+
+publish_signal_envelope("litsci.download_gap", 0.7, kind="pdf_missing", source="litsci")
+```
+
+判据很简单：**每拍都要被询问**的聚合型传感器走注册表（本 demo 的 contributor），**发完就走**的突发信号走包络（`report_download_gap()`）。
+
+### 装上即被看见：entry points 自动发现
+
+`register_*` 有个容易漏的前提——得有人 import 你的模块。包装上了不等于被导入了，靠导入顺序碰运气会时灵时不灵，且失败时静默。把注册项写进 entry points，包管理器替你解决：
+
+```toml
+[project.entry-points."krow.metacog.contributors"]
+litsci_download = "litsci_metacog_demo:DownloadCompletenessContributor"
+
+[project.entry-points."krow.metacog.wake_triggers"]
+litsci_zero_download = "litsci_metacog_demo:wake_zero_download_with_hits"
+```
+
+两条路径登记同一个 FQCN 时按字面量去重，只跑一遍。
 
 ## 反模式（都有铁证，别踩）
 

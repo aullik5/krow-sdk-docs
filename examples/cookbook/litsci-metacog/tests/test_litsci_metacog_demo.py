@@ -11,9 +11,25 @@ from types import SimpleNamespace
 
 import pytest
 from litsci_metacog_demo import (
+    AXIS_DOWNLOAD_GAP,
+    DOWNLOAD_GAP_THRESHOLD,
+    HANDLED_BY,
     DownloadCompletenessContributor,
     register,
     wake_zero_download_with_hits,
+)
+
+
+try:  # 强度换算在 SDK facade 里；cookbook 单独跑（无 monorepo 在 path）时缺席
+    from krow_agent_sdk.metacognition import wake_magnitude_from_ratio  # noqa: F401
+
+    _HAS_FACADE = True
+except Exception:  # noqa: BLE001
+    _HAS_FACADE = False
+
+_needs_facade = pytest.mark.skipif(
+    not _HAS_FACADE,
+    reason="强度换算需 krow-agent-sdk[runtime]（demo 无 SDK 时退回恒 1.0）",
 )
 
 
@@ -41,7 +57,7 @@ class TestContributor:
         )
         assert c.applicable(exe) is True
         out = c(exe)
-        assert out["error_vector"]["download_gap"] == 1.0
+        assert out["error_vector"][AXIS_DOWNLOAD_GAP] == 1.0
         assert out["signals"]["papers_found"] == 5
         assert out["signals"]["dl_downloaded"] == 0
 
@@ -51,7 +67,7 @@ class TestContributor:
             s1=_sr("paper_search", {"papers": [{"id": i} for i in range(5)]}),
             s2=_sr("download_pdf", {"counts": {"requested": 5, "downloaded": 4, "failed": 1}}),
         )
-        assert c(exe)["error_vector"]["download_gap"] == 0.2
+        assert c(exe)["error_vector"][AXIS_DOWNLOAD_GAP] == 0.2
 
     def test_non_litsci_task_not_applicable(self):
         c = DownloadCompletenessContributor()
@@ -71,8 +87,13 @@ class TestWakeTrigger:
             s1=_sr("paper_search", {"papers": [{"id": i} for i in range(5)]}),
             s2=_sr("download_pdf", {"counts": {"requested": 5, "downloaded": 0, "failed": 5}}),
         )
-        reason = wake_zero_download_with_hits(None, _snap(c, exe), {}, None)
-        assert reason is not None and "zero_download" in reason
+        fired = wake_zero_download_with_hits(None, _snap(c, exe), {}, None)
+        assert fired is not None
+        reason, magnitude = fired
+        assert "zero_download" in reason
+        assert magnitude >= 1.0
+        if _HAS_FACADE:
+            assert magnitude > 1.0, "完整度归零应报满强度，否则同拍竞争必输"
 
     def test_form_b_high_failure_fires(self):
         c = DownloadCompletenessContributor()
@@ -80,8 +101,41 @@ class TestWakeTrigger:
             s1=_sr("paper_search", {"papers": [{"id": i} for i in range(10)]}),
             s2=_sr("download_pdf", {"counts": {"requested": 10, "downloaded": 3, "failed": 7}}),
         )
-        reason = wake_zero_download_with_hits(None, _snap(c, exe), {}, None)
-        assert reason is not None and "download_gap" in reason
+        fired = wake_zero_download_with_hits(None, _snap(c, exe), {}, None)
+        assert fired is not None
+        reason, magnitude = fired
+        assert "download_gap" in reason
+        assert magnitude >= 1.0
+        if _HAS_FACADE:
+            assert magnitude > 1.0, "70% 失败超阈 0.5 → 强度应大于恰好达阈的 1.0"
+
+    @_needs_facade
+    def test_magnitude_scales_with_severity(self):
+        """强度必须随严重度单调——恒定强度等于没自报。"""
+        c = DownloadCompletenessContributor()
+
+        def _mag(requested: int, failed: int) -> float:
+            exe = _exe(
+                s1=_sr("paper_search", {"papers": [{"id": i} for i in range(requested)]}),
+                s2=_sr("download_pdf", {"counts": {
+                    "requested": requested,
+                    "downloaded": requested - failed,
+                    "failed": failed,
+                }}),
+            )
+            fired = wake_zero_download_with_hits(None, _snap(c, exe), {}, None)
+            assert fired is not None
+            return fired[1]
+
+        assert _mag(10, 6) < _mag(10, 9)
+
+    def test_declaration_surface_is_complete(self):
+        """三条声明缺一条，触发器就会在裁决或满秩校验上出问题。"""
+        t = wake_zero_download_with_hits
+        assert t.value_axis == "completeness"
+        assert t.error_axis == AXIS_DOWNLOAD_GAP
+        assert t.handled_by == HANDLED_BY
+        assert DOWNLOAD_GAP_THRESHOLD > 0
 
     def test_healthy_does_not_fire(self):
         c = DownloadCompletenessContributor()
