@@ -56,8 +56,12 @@ def _iter_tool_outputs(executor: Any, tool_prefix: str):
                 yield out
 
 
-def _aggregate_counts(executor: Any) -> dict[str, int]:
-    """聚合检索/下载计数（复用工具返回值 SSOT，不新造账本）。"""
+def aggregate_counts(executor: Any) -> dict[str, int]:
+    """聚合检索/下载计数（复用工具返回值 SSOT，不新造账本）。
+
+    公开给同 cookbook 的执行面 demo（``litsci_actuation_demo``）复用：观测与执行
+    必须读**同一份**计数，各算各的就会出现"传感器说缺、执行器说不缺"。
+    """
     downloaded = failed = requested = papers_found = search_ran = 0
     for out in _iter_tool_outputs(executor, "download_pdf"):
         counts = out.get("counts")
@@ -89,12 +93,12 @@ class DownloadCompletenessContributor:
 
     def applicable(self, executor: Any) -> bool:
         # 收窄：有检索或下载活动才自报适用（防"传感器失活"假阳）。
-        c = _aggregate_counts(executor)
+        c = aggregate_counts(executor)
         return bool(c["search_ran"] or c["requested"])
 
     def __call__(self, executor: Any) -> dict[str, Any]:
         try:
-            c = _aggregate_counts(executor)
+            c = aggregate_counts(executor)
             if not (c["search_ran"] or c["requested"]):
                 return {}
             signals: dict[str, Any] = {
@@ -254,6 +258,7 @@ def report_download_gap(failed: int, requested: int) -> bool:
 
 __all__ = [
     "DownloadCompletenessContributor",
+    "aggregate_counts",
     "wake_zero_download_with_hits",
     "register",
     "report_download_gap",

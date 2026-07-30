@@ -1,6 +1,15 @@
-# Cookbook · 配置决策脑三注册表（litsci-metacog）
+# Cookbook · 配置决策脑（litsci-metacog）：看得见 + 动得了手
 
-把你自己垂直功能的**完整度信号**接进 Krow 的元认知**决策脑**（GWT 全局工作站），让它对你的任务"看得见、叫得醒、算得清"。本 demo 以"文献检索下载完整度"为例，是自包含的——不依赖任何真实检索后端，纯 System-1 逻辑，无需 LLM / API key 即可跑通。
+把你自己垂直功能的**完整度信号**接进 Krow 的元认知**决策脑**（GWT 全局工作站），并让它对这个信号**做针对性的事**。本 demo 以"文献检索下载完整度"为例，是自包含的——不依赖任何真实检索后端，纯 System-1 逻辑，无需 LLM / API key 即可跑通。
+
+两个面，配套交付（缺任一面都是半边墙）：
+
+| 面 | 文件 | 回答 |
+|---|---|---|
+| **观测面**（三注册表） | `litsci_metacog_demo.py` | 决策脑**看见**"检索有果却零下载" |
+| **执行面**（执行器） | `litsci_actuation_demo.py` | 看见之后**改做什么**：不再重试全文，转元数据清单交付 |
+
+只有观测面时，你能做的极限是把信号发出去，然后期待通用决策（`replan` / `converge`）恰好对症——真实体感是传感器天天报"零下载"，而系统只会让 LLM 再 replan 一次同样的检索。
 
 ## 为什么需要它
 
@@ -38,6 +47,8 @@ pytest -q
 - **场景 A**（5 篇候选、0 下载）→ `error_vector.download_gap=1.0`，wake 命中"零下载"；
 - **场景 B**（5 篇下 4 篇）→ `download_gap=0.2`，wake 不命中（正常推进）；
 - **场景 C**（非文献任务）→ `applicable=False`（收窄门禁，避免"传感器失活"假阳）。
+
+然后跑一遍**执行面**：连续几拍"又试了一轮下载、仍然零成功"，执行器在第 3 拍开火，往计划里追加一步"导出元数据清单"，第 4 拍起因触顶而让位。执行面需要 `[runtime]`（注册表在 runtime 里），缺则自动跳过并打印提示。
 
 ## 核心用法（`litsci_metacog_demo.py`）
 
@@ -103,6 +114,63 @@ litsci_zero_download = "litsci_metacog_demo:wake_zero_download_with_hits"
 
 两条路径登记同一个 FQCN 时按字面量去重，只跑一遍。
 
+## 执行面：让决策脑替你动手（`litsci_actuation_demo.py`）
+
+观测面到此为止只解决了"看得见"。真正省钱的是下一步：**下不动就别再下了**。
+
+```python
+from krow_agent_sdk.actuation import (
+    AUTHORITY_PLAN, append_plan_step, make_actuator_action,
+    register_reflex_decision, register_step_actuator, saturation_counter,
+)
+
+class MetadataFallbackActuator:          # 必须是模块顶层类（按 FQCN re-import）
+    MAX_FIRES = 1
+
+    def __init__(self):                   # 每任务一个新实例，计数器不跨任务
+        self._fired = 0
+        self._last_attempts = -1
+        self._counter = saturation_counter(2, label="litsci_download")
+
+    def __call__(self, exe, plan):
+        counts = aggregate_counts(exe)                  # 与观测面读同一份计数
+        if counts["requested"] <= 0 or counts["downloaded"] > 0:
+            return None                                  # 自判适用性 / 还在出货
+        if counts["requested"] <= self._last_attempts:
+            return None                                  # 没有新尝试 → 不动 ≠ 饱和
+        self._last_attempts = counts["requested"]
+        if not self._counter.observe_signature(counts["downloaded"]).saturated:
+            return None
+        step = append_plan_step(exe, plan, tool="litsci_export_metadata",
+                                purpose="…不要再重试下载，改导出元数据清单…")
+        if step is None:
+            return None
+        self._fired += 1
+        return make_actuator_action(new_step=step, decision="litsci_metadata_fallback")
+```
+
+注册**两半都要**，缺一不可：
+
+```python
+register_reflex_decision(
+    "litsci_metadata_fallback", authority=AUTHORITY_PLAN,
+    actuator="litsci_actuation_demo:MetadataFallbackActuator",
+    axis="litsci_download_gap",      # 与观测面同一条轴，否则满秩矩阵上是两个格子
+    max_fires=1,
+)
+register_step_actuator("litsci_actuation_demo:MetadataFallbackActuator")
+```
+
+只注册执行器：它照常开火，但 `actuations_total` 不计——报表会说"决策脑从没动手"，而基于这种读数最容易做的决定恰恰是**退化功能**（本仓真实事故）。只登记契约：没有执行器认领，满秩矩阵报"声明了没生效"。
+
+**判据三条纪律**（`tests/test_litsci_actuation_demo.py` 逐条守）：
+
+1. **自判适用性**：非本族任务直接闭嘴，不靠注册顺序抢；
+2. **饱和签名读产出、且只在有新尝试时观测**——写成"连续 N 拍没变化"会在 agent 读已下到的 PDF 时假开火，把好路子撤掉；
+3. **有界**：`MAX_FIRES` 触顶让位 `converge`，别把计划撑爆。
+
+**换框架的首选姿态不是写 python**：如果你只是"A 路子不行换 B 路子"，在 ACT `__act__.yaml` 里声明 `reframe_frameworks` 即可，由内建通用 provider 消费（内建 19 个 ACT 有 15 个是这么覆盖的）。只有饱和判据要读**领域产物**（本 demo 的"下载成功数"就是）时，写执行器才划算。
+
 ## 反模式（都有铁证，别踩）
 
 | 反模式 | 症状 | 解 |
@@ -112,8 +180,11 @@ litsci_zero_download = "litsci_metacog_demo:wake_zero_download_with_hits"
 | **唤醒风暴** | 同一条件每拍唤醒 → 淹没真信号 | 每形态每任务只唤醒一次；靠 signals 键天然门禁非本域任务 |
 | **传感器失活假阳** | `applicable` 恒真却零产出 | 收窄到"探测到活跃领域信号"才 True |
 | **自造账本** | 在 executor 上挂新状态 → 与工具 output SSOT 漂移 | 复用工具返回值 / `_step_results`，不新造 |
+| **不登记契约就开火** | 动作真生效，报表 `actuations_total` 恒 0 → 复盘结论反向 | `register_reflex_decision` + 动作带 `decision=` |
+| **饱和签名读时间不读产出** | agent 干别的正事时假开火，把好路子撤了 | 签名只读本路子的产出，且只在"有新尝试"时观测 |
+| **无界执行器** | 每拍注一步 → 计划膨胀、预算烧光 | `MAX_FIRES` / `max_fires`，触顶让位 `converge` |
 
 ## 延伸阅读
 
-- 进阶指南「配置决策脑三注册表」：完整讲 error_vector 设计、L0/L1/L2 权威阶梯、稀疏唤醒纪律。
-- API 参考 `metacognition` 小节：四个公开函数的签名与契约。
+- 进阶指南「配置决策脑三注册表」（观测面）+「让决策脑替你动手」（执行面）：完整讲 error_vector 设计、L0/L1/L2 权威阶梯、稀疏唤醒纪律、饱和判据。
+- API 参考 `metacognition` / `actuation` 小节：公开函数的签名与契约。

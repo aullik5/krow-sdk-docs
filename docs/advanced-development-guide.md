@@ -2130,6 +2130,82 @@ litsci 是"基于 SDK 开发、独立配置三注册表"的活例子（源码 `p
 
 **正/中性反馈（signed salience）**：决策脑不再只对"故障"（负向）反应——核心已内建**正半轴**（`pace_ahead` 进度显著领先预算 / `early_convergence` 已达标而预算有余）与**中性半轴**（`context_shift` 出现计划未预期的新缺口维度）触发器，对应新动作 **conclude 提前落袋** 与 **deepen 机会性深化**。这些是 domain-neutral 核心能力，**你无需注册即自动享受**；你只需按上表把领域 `signals` 喂进快照，正向触发器会读通用派生信号（progress/burn/quality_deficit）自动工作。三重阻尼防 scope creep：正向唤醒走**独立子配额**（永不挤占负向/L0）、**一次性**、`deepen` 仅在交付规格留有质量余量（`quality_headroom` 信号）时才渲染且**严禁扩展用户未要求的范围**。
 
+### 10.9 让决策脑替你动手：执行面注册（2026-07-30）
+
+> API 速查见 [`api-reference.md`](./api-reference.md) §9.7；本节讲**判据怎么选**——那才是写执行器唯一值钱的部分。
+
+§10.1–10.8 讲的全是**观测面**：让决策脑看见你的领域。但看见之后由谁动手？在此之前答案是"只能是核心那几条通用决策"。于是外部开发者能做的极限是把信号发出去，然后期待 `replan` / `converge` 恰好对症——这正是本仓吃过多次的那种半边墙的**扩展面版本**：有传感器没执行器。
+
+现在两个执行入口都对外开放（`krow_agent_sdk.actuation`）：
+
+| 入口 | 什么时候被问 | 你回答什么 |
+|---|---|---|
+| **StepActuator** | 每个 step 执行完之后 | "这里缺一步，我补上"（纯加法） |
+| **ReframeProvider** | 同上，但**先于**所有补救执行器 | "当前这条路子饱和了，撤掉余步换一条"（减法 + 加法） |
+
+**为什么减法要单独有个入口**（这是整套机制的由来）：补救执行器只会往计划里**加**步。当一条路子本身走不通时，加步只是在同一堵墙上多撞几次——真机上表现为"越努力越贵、产出不变"。所以撤步与起新路必须在**同一次动作**里原子生效，且撤步由通用层裁决（三条不变量：已执行步不撤 / 交付步不撤 / 被依赖步不撤），provider 只描述意图。
+
+#### 判据纪律：三条
+
+**① 零 LLM**。执行器是 System-1：确定性、可 unit test、毫秒级。要语义的部分留给它注入的那一步——`purpose` 里把"做什么、为什么、不要再做什么"写成**成品指令**（TURBO 总则②），参数由 micro LLM 按语义填。写成"继续处理"这种零件文案等于什么都没说。
+
+**② 自判适用性**。不认自己这一族就返 `None`，别靠注册顺序抢。判据要读**你的领域产物**，不要读"过了多少拍"——后者会在 agent 正常跑别的步骤时假开火。
+
+**③ 饱和签名选"产出"，不选"时间"**。`saturation_counter()` 的用法是每次观测喂一个**产出签名**，签名没变即 +1、变了归零：
+
+```python
+from krow_agent_sdk.actuation import make_reframe_plan, make_plan_step, saturation_counter
+
+class MyReframeProvider:
+    def __init__(self) -> None:
+        self._counter = saturation_counter(3, label="smart_layer")
+
+    def __call__(self, exe, plan):
+        if not _is_my_family(exe):
+            return None
+        # 签名 = 这条路子的产出。内建三族分别取：store 四桶计数（推理）/
+        # 相位 progress（wiki 编译）/ 成功出图数（PPT）——都是"做出来了多少"。
+        if not self._counter.observe_signature(_my_output_signature(exe)).saturated:
+            return None
+        step = make_plan_step(exe, tool="my_open", purpose="…换一条路子的成品指令…")
+        return make_reframe_plan(
+            drop_step_ids=_pending_ids_of_saturated_path(plan),
+            new_step=step,
+            reason="smart_layer 连续 3 拍无新产出",
+            telemetry={"signature": _my_output_signature(exe)},
+        )
+```
+
+注意通用的 `ActDeclaredReframeProvider` 用的签名是"**尝试**次数涨了、**成功**次数没涨"——它刻意不看"没动静"，因为不动 ≠ 饱和（agent 可能正在别处干正事）。你自定义签名时保留这个性质：**饱和 = 在试、且试不出新东西**。
+
+#### 记账：不登记契约 = 报表上你从没动过手
+
+`ledger.actuations` 按**决策名**计数，计数前查契约表，没登记的动作直接不计。铁证在治理文档 §9.0 第 3 项：四个内建执行器天天注入步骤，报表 `actuations_total` 恒 0，据此得出的结论是"决策脑从不动手"——差一点据此把功能退休。所以：
+
+```python
+register_reflex_decision(
+    "my_gap_fix", authority="A3",
+    actuator="my_pkg.actuators:MyActuator",   # 与 register_step_actuator 同一字符串
+    axis="my.gap",                            # 先 register_domain_axis 登记
+    max_fires=2,
+)
+```
+
+换框架**不要**自己起决策名，用现成的 `DECISION_REFRAME`（全族共用一个名字是刻意的：按族拆名会把一个控制律的指标拆成 N 份，横向比不了）。想知道"我这一族到底通电了没有"，读结案 `metacog_decision_stats["actuation_sources"]`——它按**来源类**分档，正是为这个问题加的。
+
+#### 反模式（执行面专属）
+
+| 反模式 | 症状 | 解 |
+|---|---|---|
+| **不登记契约就开火** | 动作真生效，报表 `actuations_total` 恒 0 → 复盘结论反向 | `register_reflex_decision` + 动作带 `decision=` |
+| **把请求当结果** | 遥测里写"撤了 5 步"，实际被不变量挡下 3 步 | 只信 `cognitive.actuated` 事件里的 `dropped_steps` |
+| **无界执行器** | 每拍都注一步 → 计划膨胀、预算烧光 | `max_fires` / 自己的 `MAX_FIRES`，触顶让位 `converge` |
+| **饱和签名读时间** | agent 干别的正事时假开火，把好路子撤了 | 签名只读本路子的**产出** |
+| **能声明却写了 provider** | 15 个内建 ACT 都靠 yaml 覆盖，你多维护一份 python | 先试 `reframe_frameworks`，判据要读领域产物时才写 provider |
+| **耗尽时假装成功** | 所有路子试完仍返回"新步" → 空烧到预算耗尽 | `make_reframe_plan(new_step=None)` 只撤不加，把缺口交给 `converge` 如实收敛 |
+
+**在哪注册**：与 §10.5 同款——进程启动早期一次，幂等。headless / K8s 下注册表是**进程内**状态，每个 Pod 都要跑到；`get_actuation_snapshot()` 启动后打一行日志自检。
+
 ---
 
 ## §11 多 Agent 轻量协同（A 层 persona + B 层 delegate · v0.9.0.31+）

@@ -464,6 +464,28 @@ resources:
 3. 确认前缀 + 长度（`sk-user-` + 40 字符 = 48 字符整 / `sk-` 前缀任何 ≥ 20 字符 / `pk-pilot-` 联调用）
 4. 任何 401 响应 header 里有 `X-Request-Id`，贴给 [support@krow.cn](mailto:support@krow.cn) 协查
 
+### Q10: 我注册的 plugin / 传感器 / 执行器在 Pod 里"没反应"
+
+**根因**：三张扩展注册表（工具与 ACT、元认知三注册表、执行面执行器 / reframe provider）都是**进程内**状态——不落盘、不跨 Pod 共享、不随 `KROW_DATA_DIR` 持久化。桌面端你可能在某个 UI 启动路径里 import 到了注册模块，headless 入口脚本却没有，于是"装上了 ≠ 被导入了"。症状是它**安静地什么都不做**，与"判据没命中"长得一模一样。
+
+**修法（按稳妥度排序）**：
+
+1. **entry points 自动发现**（推荐）：把注册项写进你的包的 `[project.entry-points."krow.metacog.*"]`，装上即被总线看见，不依赖任何一方 import。写法见 [`api-reference.md`](./api-reference.md) §9.6。
+2. **显式注册放进程启动期**：在入口脚本 `build()` **之前**调一次（幂等），别放在请求处理函数里——多副本 / 多 worker 时各进程都要跑到。
+3. **启动自检打一行日志**，比"以为注册上了"便宜得多：
+
+```python
+from krow_agent_sdk.metacognition import get_registry_snapshot
+from krow_agent_sdk.actuation import get_actuation_snapshot
+
+logging.info("metacog=%s actuation=%s",
+             get_registry_snapshot()["counts"], get_actuation_snapshot()["counts"])
+```
+
+**跑起来之后怎么确认真生效**：订阅 `cognitive.*` 事件（`run_stream` 默认已含 `cognitive.actuated`），或读结案 `result.metacog_decision_stats`——`actuations` 按决策名计数，`actuation_sources` 按来源类分档。注册快照回答"我注册上了吗"，这两个才回答"它真开火了吗"。
+
+> 慢环 overlay（睡眠期蒸馏结果）是另一回事：那个**要**持久化，`KROW_DATA_DIR` 必须挂 PVC，否则每次 Pod 重建都从零学起。见 [`advanced-development-guide.md`](./advanced-development-guide.md) §9.4。
+
 ---
 
 ## 7. 安全 / 合规 checklist（生产环境）

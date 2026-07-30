@@ -2604,6 +2604,128 @@ my_trigger = "my_pkg.triggers:MyTrigger"
 
 完整实战（观测层 error_vector 设计、稀疏唤醒纪律、L0/L1/L2 权威阶梯、反模式）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §10「配置决策脑三注册表」+ cookbook `examples/cookbook/litsci-metacog/`。
 
+### §9.7 `actuation` — 让决策脑替你动手（执行面）
+
+```python
+from krow_agent_sdk.actuation import (
+    register_step_actuator,
+    register_reframe_provider,
+    register_reflex_decision,
+    append_plan_step,
+    make_actuator_action,
+    get_actuation_snapshot,
+)
+```
+
+§9.6 开放的是**观测面**：你能让决策脑知道"我这一族卡住了"。本节开放的是另一半——**执行面**：让它对你的领域做**针对性**的事，而不是只能落到通用的 `continue` / `replan` / `converge` 上。
+
+两类扩展点，按"加法 / 减法"分：
+
+| 你要的行为 | 扩展点 | 契约 |
+|---|---|---|
+| 每个 step 边界看一眼，缺什么就**补一步** | **StepActuator** | `__call__(executor, plan) -> ActuatorAction \| None` |
+| 一条路子走不通就**撤掉余步、换一条** | **ReframeProvider** | `__call__(executor, plan) -> ReframePlan \| None` |
+
+| 函数 | 签名 | 用途 |
+|---|---|---|
+| `register_step_actuator(target)` | `(type\|callable\|str) -> str` | 登记步骤边界执行器（幂等 · 注册期校验 FQCN 可 re-import） |
+| `register_reframe_provider(target)` | `(type\|callable\|str) -> str` | 登记换框架 provider（同上；排在内建 provider 之后） |
+| `register_reflex_decision(...)` | `(str, *, authority, actuator, axis, ...) -> str` | 登记**反射级**决策契约 —— 开火才会计入 `actuations_total` |
+| `make_plan_step(executor, *, tool, purpose)` | `-> PlanStep` | 造一步新计划步，**不入 plan**（reframe 用；撤旧起新要原子生效） |
+| `append_plan_step(executor, plan, *, tool, purpose, best_effort=True)` | `-> PlanStep \| None` | 造一步并入 plan（step 执行器用）；plan 不可变时返 `None` |
+| `make_actuator_action(*, new_step, dropped_steps, observation, decision, telemetry)` | `-> ActuatorAction` | 构造 StepActuator 的返回值 |
+| `make_reframe_plan(*, drop_step_ids, new_step, reason, ...)` | `-> ReframePlan` | 构造 ReframeProvider 的返回值 |
+| `saturation_counter(threshold=None, *, label="")` | `-> SaturationCounter` | "连续 N 次没有改善"计数器（`observe_signature()` / `.saturated` / `.reset()`） |
+| `get_actuation_snapshot()` | `() -> dict` | 只读：执行面注册表现状（debug"我的执行器注册上了吗"） |
+
+**先看看能不能不写 python**。换框架的首选姿态是在你的 ACT `__act__.yaml` 里**声明**可切换的解法路子，由内建的通用 provider 消费（判据："这条路子的尝试次数在涨、成功次数不涨"）：
+
+```yaml
+reframe_frameworks:
+  - name: smart_layer
+    tools: [my_smart_do, my_smart_fix]
+  - name: primitives
+    tools: [my_open, my_patch, my_verify]
+    entry_tool: my_open          # 缺省取 tools[0]；必须是 LLM 看得见的工具
+    hint: |                      # 切换目标必填：换过去时喂给 LLM 的成品文案
+      一把梭工具已连续失败。这一层失败的常见真因不是写法不对，而是对象状态与
+      假设不符 —— 先 my_open 核对真实状态，再用 my_patch 逐步改。
+```
+
+内建 19 个 ACT 里有 15 个就是这么覆盖的。**只有当饱和判据需要读领域产物**（"库里的假设数没变" / "出图成功数没涨"）时，写 provider 才划算——那时你写的是 `saturation_signature`，不是控制律本身。
+
+**一个完整的 StepActuator**：
+
+```python
+# my_pkg/actuators.py —— 必须是模块顶层类（注册表按 FQCN re-import 实例化）
+from krow_agent_sdk.actuation import append_plan_step, make_actuator_action
+
+class TranslationGapActuator:
+    MAX_FIRES = 2
+
+    def __init__(self) -> None:      # 每个任务一个新实例，计数器不跨任务
+        self._fired = 0
+
+    def __call__(self, exe, plan):
+        if self._fired >= self.MAX_FIRES:
+            return None
+        missing = _untranslated_sections(exe)     # 你的领域判据：确定性、零 LLM
+        if not missing:
+            return None                            # 自判适用性：不认这一族就闭嘴
+        step = append_plan_step(
+            exe, plan,
+            tool="my_translate",
+            purpose=f"System-1 补做：{len(missing)} 节尚未翻译 —— {missing[:3]}",
+        )
+        if step is None:
+            return None
+        self._fired += 1
+        return make_actuator_action(
+            new_step=step,
+            decision="translate_gap",              # 已登记的契约名，见下
+            observation=f"检出 {len(missing)} 节未翻译，已追加补做步。",
+            telemetry={"missing": len(missing)},
+        )
+```
+
+```python
+# my_pkg/__init__.py（进程启动早期调一次，幂等）
+from krow_agent_sdk.actuation import register_reflex_decision, register_step_actuator
+from krow_agent_sdk.metacognition import register_domain_axis
+
+register_domain_axis("my.translation_gap")         # 先登记轴，再让决策认领它
+register_reflex_decision(
+    "translate_gap",
+    authority="A3",                                 # A3 = 动计划（追加 / 撤步）
+    actuator="my_pkg.actuators:TranslationGapActuator",
+    axis="my.translation_gap",
+    max_fires=2,
+)
+register_step_actuator("my_pkg.actuators:TranslationGapActuator")
+```
+
+| 权限常量 | 值 | 动到什么 |
+|---|---|---|
+| `AUTHORITY_PARAM` | `A0` | 改参数 |
+| `AUTHORITY_ROUTE` | `A1` | 改路由 |
+| `AUTHORITY_ARTIFACT` | `A2` | 动产物（**必须**声明 `compile_input`：产物是否进知识编译输入） |
+| `AUTHORITY_PLAN` | `A3` | 动计划（多数 step 执行器在这一级） |
+| `AUTHORITY_META` | `A4` | 动元级 |
+
+**三条铁律**（由机制层物理守住，不是提示）：
+
+1. **记账**：动作的 `decision` 必须是已登记的契约名，否则开火**不进** `actuations_total`。真实事故：四个内建执行器天天注入步骤而报表恒 0，据此差点把功能退休——"生效了没声明"和"声明了没生效"一样贵。
+2. **有界**：`max_fires`（或你自己的 `MAX_FIRES`）。触顶即记饱和，之后由 `escalate` / `converge` 接手。完全无界不允许。
+3. **撤步以返回值为准**：`dropped_steps` 是**请求**，机制层按三条不变量过滤（已执行步不撤 / 交付步不撤 / 被依赖步不撤）。实际撤成什么样看 `cognitive.actuated` 事件里的 `dropped_steps`——把请求值当结果写进遥测就是一堵"声明 ≠ 生效"的墙。
+
+**反射级 ≠ LLM 菜单项**：`register_reflex_decision` 登记的是由系统条件自动触发、**不进 LLM 决策菜单**的动作（`KIND_REFLEX`）。想让 LLM 能主动选的动作属核心表范畴，需要改 krow 核心并过满秩闸，不在本 facade 授权范围内。
+
+**可观测**：执行器开火 emit `cognitive.actuated`（`run_stream` 默认订阅，见 [§6.3](#63-稳定-topic-速查)），payload 含 `decision` / `fires` / `dropped_steps`。结案 `result.metacog_decision_stats` 里 `actuations` 按**决策名**计数、`actuation_sources` 按**来源类**分档（换框架全族共用 `reframe` 一个决策名，所以"我这一族到底通电了没有"只能从后者读出来）。
+
+**headless / K8s**：注册必须在**每个 Pod 的进程启动期**跑到（注册表是进程内状态，不落盘、不跨进程共享）。用 entry points 自动发现最稳（见 §9.6 同款写法），显式 `register_*` 则要确保有人 import 到你的模块；启动后用 `get_actuation_snapshot()` 打一行日志自检，比"以为注册上了"便宜得多。
+
+完整实战（判据怎么选、饱和签名怎么写、反模式）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §10.9「让决策脑替你动手」。
+
 ---
 
 ## §10. Telemetry 反向遥测

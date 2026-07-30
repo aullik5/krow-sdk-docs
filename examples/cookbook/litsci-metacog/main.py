@@ -1,7 +1,12 @@
-"""可跑 demo：注册决策脑三注册表 + 模拟三种态势看信号/唤醒结果。
+"""可跑 demo：注册决策脑三注册表 + 执行面执行器，模拟态势看信号/唤醒/开火。
 
-无需真实 LLM / API key —— 本 demo 只演示"观测层 + 唤醒层"如何把领域完整度
-信号接进决策脑。真实任务里这些信号会在 Agent 运行的每个 macro 拍自动被采集。
+无需真实 LLM / API key —— 本 demo 演示两件事：
+
+1. **观测面**（``litsci_metacog_demo``）：让决策脑看见领域完整度缺口；
+2. **执行面**（``litsci_actuation_demo``）：让它对这个缺口做针对性的事。
+
+真实任务里这些都在 Agent 运行的每个 macro / step 边界自动发生。执行面部分需要
+``krow-agent-sdk[runtime]``（注册表在 runtime 里），缺则自动跳过并打印提示。
 
 运行：
     python main.py
@@ -10,6 +15,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from litsci_actuation_demo import MetadataFallbackActuator, register_actuation
 from litsci_metacog_demo import (
     DownloadCompletenessContributor,
     register,
@@ -92,6 +98,57 @@ def main() -> None:
     # 零注册通道：突发信号直接发包络，不必写 contributor。
     delivered = report_download_gap(failed=6, requested=10)
     print(f"\n信号包络投递：{delivered}（无 runtime 时 fail-soft 返 False）")
+
+    _demo_actuation()
+
+
+def _demo_actuation() -> None:
+    """执行面：下载路子饱和 → 执行器追加"导出元数据清单"补做步。
+
+    观测面到此为止只能让决策脑**知道**零下载；接下来这一段让它**改做别的**。
+    """
+    print("\n" + "=" * 60)
+    print("执行面（决策脑替你动手）")
+    print("=" * 60)
+
+    fqcns = register_actuation(strict=False)
+    if not fqcns:
+        print("[!] 未检测到 krow-agent-sdk[runtime]，执行面 demo 跳过"
+              "（执行器注册表在 runtime 里）。")
+        return
+    print(f"[ok] 已注册：{fqcns}\n")
+
+    actuator = MetadataFallbackActuator()
+    plan = SimpleNamespace(steps=[])
+    exe = SimpleNamespace(_step_results={}, _current_plan=plan)
+
+    per_round = 3
+
+    def _beat(n: int) -> None:
+        """模拟一拍：又试了一轮下载（仍然零成功），然后问执行器一次。"""
+        exe._step_results[n] = _sr(
+            "download_pdf",
+            {"counts": {"requested": per_round, "downloaded": 0, "failed": per_round}},
+        )
+        action = actuator(exe, plan)
+        verdict = "开火" if action is not None else "不开火"
+        print(f"  第 {n} 拍（累计尝试 {n * per_round} 次，0 成功）→ {verdict}")
+        if action is not None:
+            print(f"    decision   = {action.decision}")
+            print(f"    new_step   = #{action.new_step.step_id} {action.new_step.tool}")
+            print(f"    telemetry  = {action.telemetry}")
+
+    exe._step_results[0] = _sr(
+        "paper_search", {"papers": [{"id": i} for i in range(8)]}
+    )
+    print("场景：检索到 8 篇，全文连续下不动（付费墙）")
+    _beat(1)  # 首拍只是建立基线——没有上一次就无从谈"没变化"
+    _beat(2)  # 有新尝试、产出仍为 0 → 饱和计数 +1
+    _beat(3)  # 达阈 → 开火，追加元数据交付步
+    _beat(4)  # 有界：MAX_FIRES=1，之后让位 converge
+
+    print(f"\n  计划里新增的步：{[s.tool for s in plan.steps]}")
+    print("  ↑ 它被标成 best_effort：做不完只记 degraded，不把整个任务判失败")
 
 
 if __name__ == "__main__":
