@@ -2501,7 +2501,8 @@ Krow 的 macro 编排是元认知**决策脑**（GWT 全局工作站）：所有
 | `register_situation_contributor(target)` | `(type\|callable\|str) -> str` | **观测层**：登记 SituationContributor（`applicable()`+`__call__()->{"error_vector","signals"}`） |
 | `register_wake_trigger(target)` | `(callable\|str) -> str` | **唤醒层**：登记 WakeTrigger（`(prev,curr,delta,ledger)->str\|None`） |
 | `register_decision_classifier(target)` | `(callable\|str) -> str` | **结算层**：登记 DecisionClassifier（`(action,snap,ledger)->str\|None`） |
-| `get_registry_snapshot()` | `() -> dict` | 只读：三注册表已登记内容 + 计数（debug"我的 contributor 注册上了吗"） |
+| `register_control_reflex(name, *, on, actuator, max_fires=1, note="")` | `(...) -> str` | **控制层**：登记控制反射（`(executor)->bool`），在 LLM 被问**之前**确定性动手 |
+| `get_registry_snapshot()` | `() -> dict` | 只读：三注册表 + `control_reflexes` 已登记内容 + 计数（debug"我的 contributor 注册上了吗"） |
 
 **入参**：可传**类/函数对象**（facade 自动推导 FQCN 并**校验可 re-import**）或 **FQCN 字符串** `pkg.mod:Symbol`。返回实际登记的 FQCN。
 
@@ -2512,6 +2513,29 @@ Krow 的 macro 编排是元认知**决策脑**（GWT 全局工作站）：所有
 | Contributor | `applicable(executor)->bool` + `__call__(executor)->dict` | `{"error_vector": {名: 0~1 距离}, "signals": {名: 值}}`（两键均可选） |
 | WakeTrigger | `(prev, curr, delta, ledger)->str\|None` | 命中返唤醒事由字符串；否则 `None`。设 `fn.l0_event=True` 让它在软预算耗尽后仍能唤醒（完整度红线） |
 | DecisionClassifier | `(action, snap, ledger)->str\|None` | 把 LLM 揭示的动作归类（信用回喂）；未命中 `None` 回落核心矩阵 |
+
+**醒来之后要*做*什么**（`register_control_reflex`）：上面三层合起来只解决"决策脑知道了"。知道之后系统能做的曾经只有一件事——给 LLM 写一段建议文案。控制反射是"知道 → 做"的那一格，它在每个 macro 拍首的**反射带**里被问，**先于唤醒评估**，也就是在 LLM 被问之前：
+
+```python
+from krow_agent_sdk.metacognition import register_control_reflex, REFLEX_FIRED_TOPIC
+
+def flush_my_draft(executor) -> bool:   # 模块顶层函数/类；确定性、零 LLM
+    ...
+    return True                         # True = 我这次真做了事（不是"我被调用了"）
+
+register_control_reflex(
+    "mydomain_flush", on="mydomain.gap", actuator=flush_my_draft, max_fires=2,
+)
+```
+
+| 参数 | 说明 |
+|---|---|
+| `name` | 决策名（不得与核心契约撞名，建议带域前缀）。**返回值就是它**——反射的身份是决策名，去抖计数、饱和判定、结案统计都按它归集 |
+| `on` | 本反射处置的观测轴（一条或一组），写进契约 `handles`。填你的 wake trigger 上 `error_axis` 声明的那条轴，否则满秩矩阵仍判那条轴没人管 |
+| `actuator` | 顶层可调用体或 FQCN，签名 `(executor) -> bool` |
+| `max_fires` | 单任务开火上限（去抖）。触顶后反射带连问都不问，并记一次饱和（"这一级权限用尽而问题仍在"）；`0` = 不限，界由你的执行器自己守。**填多少就要真能开多少**——执行器自己的守卫（典型如"本趟还没写过东西"）若在第一次开火后永远为假，这个数就是一句空话，宿主按它做的容量规划全落空 |
+
+开火事件是 `REFLEX_FIRED_TOPIC`（`cognitive.reflex_fired`，`Agent.run_stream` 默认订阅集已含），payload 带 `decision` / `fires` / `handles`。**与 `krow_agent_sdk.actuation.register_step_actuator` 的选择判据只有时机一条**：动作是"补一步 / 撤一步"、做完还要走正常步骤执行 → 用 step 执行器（步骤边界被问，权限到 A3）；动作是"现在、立刻、在 LLM 拿到这拍态势之前就得完成"（落盘、关流式、切通道）→ 用控制反射（权限固定 A1 改路由）。
 
 **WakeTrigger 的两个轴属性**（`value_axis` 决定"有多重要"，`error_axis` 决定"谁来处置"）：
 
