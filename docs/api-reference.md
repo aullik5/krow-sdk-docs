@@ -2799,6 +2799,15 @@ stats = agent.distill_now()
 
 **⚠️ 多进程共享同一 `KROW_DATA_DIR` 时是 last-writer-wins。** overlay 的并发保护是**进程内** `RLock`，不跨进程。多个 Pod 挂同一卷各写各的，后写的整份覆盖先写的——表现为「教训莫名其妙少了几条」，且不报错。单 writer、或每副本独立卷、或走 cloud 后端（kv CAS 换指针）三选一。
 
+**云端形态下经验不持久时会明说（0.9.1.1 起）。** 跨 pod 分层继承依赖记录后端把教训写到云端；写不进去时会回落到 pod 本地。本地落点在很多编排形态下是 emptyDir，**pod 回收即丢**——这时「学到了」和「学到了但下次没了」必须能区分开：
+
+- 日志：`WARNING`，带 ASCII 锚点 `[fallback=local reason=<code>]`（`kubectl logs | grep fallback=` 即可捞）；云端与本地都没写成升级为 `ERROR` 的 `[fallback=none]`；
+- 事件：`cognitive.bus_persist_degraded`。
+
+在此之前这条路径是 **fail-open** 的：云端写失败也报成功，经验静默只留在本地。如果你之前据「无报错」判断过云端持久化正常，那个结论不可靠，请按上面两个信号重新确认。
+
+**共享面是多作者的。** 宿主侧蒸馏器可能与 SDK 慢环写同一份经验存储。跨 pod 召回只读 SDK 慢环自己写的记录（按 `source` 判），宿主记录不按 SDK 的字段契约解读——两边生命周期字段名不同，误读会把宿主**未晋级**或**已判死**的教训当成已确证的外部经验。宿主经验应走宿主自己的注入通道。
+
 完整原理（四段闭环、防膨胀三道闸、晋级门两相分离）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §9「双环元认知与运行时自进化」。
 
 ---
