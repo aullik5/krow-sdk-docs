@@ -68,6 +68,8 @@
   - [§9.4 `lifecycle` — 生命周期 hook](#94-lifecycle--生命周期-hook)
   - [§9.5 `extended_md_supplement_registry` — ACT 扩展 markdown](#95-extended_md_supplement_registry--act-扩展-markdown)
   - [§9.6 `metacognition` — 配置决策脑三注册表](#96-metacognition--配置决策脑三注册表)
+  - [§9.7 `actuation` — 让决策脑替你动手（执行面）](#97-actuation--让决策脑替你动手执行面)
+  - [§9.8 慢环自进化 — `Agent` 侧读写入口](#98-慢环自进化--agent-侧读写入口)
 - [§10. Telemetry 反向遥测](#10-telemetry-反向遥测)
 - [§11. Test SDK — 开发者写 plugin 的测试工具](#11-test-sdk--开发者写-plugin-的测试工具)
 - [§12. Errors — 错误层与黄金模板](#12-errors--错误层与黄金模板)
@@ -2752,6 +2754,55 @@ register_step_actuator("my_pkg.actuators:TranslationGapActuator")
 
 ---
 
+### §9.8 慢环自进化 — `Agent` 侧读写入口
+
+§9.6 / §9.7 是**快环**（每拍观测、稀疏唤醒、当场致动）。**慢环**做的是另一件事：把跨任务反复出现的模式沉淀成教训，下次遇到同类任务提前告诉 LLM。它**默认开启且无需注册**——下面这些入口是给你审视与介入用的。
+
+| 方法 | 侧 | 签名 | 用途 |
+|---|---|---|---|
+| `diagnostics.get_overlay_snapshot(store_path=None)` | 读 | `(str\|None) -> dict` | 见 [§9.1](#91-diagnostics--状态导出)。含 `epistemic` / `root_cause` / `boundary` / `evidence`——只看 `text` 分不出「已验证的结论」与「尚未证伪的假设」 |
+| `Agent.list_learned_lessons(*, status=None)` | 读 | `(*, str\|None) -> list[dict]` | 按状态过滤（`active` / `candidate` / `conflicted` / `demoted`）。`status` **仅关键字**，位置传会 `TypeError` |
+| `Agent.list_findings(act_name=None)` | 读 | `(str\|None) -> list[dict]` | 慢环产出的 open findings（ACT 缺陷假设 / 冲突 / 体检 warn）。**绝不注入 prompt**，采纳走提案 + PR |
+| `Agent.get_base_promotion_proposal(act_name)` | 读 | `(str) -> str` | 该 ACT 最新的固化提案文本（无提案返空串）。**propose-to-human，绝不自动改 ACT base** |
+| `Agent.record_observations(patterns)` | 写 | `(Sequence[ObservedPattern]) -> int` | 把宿主侧算出的**跨任务**规律回流给蒸馏器 |
+| `Agent.distill_now()` | 写 | `() -> dict` | 立刻跑一轮睡眠期蒸馏，返回本轮统计 |
+
+**两个写入口刻意不让你手填教训**——那会绕过证据闸。`record_observations` 送的是**已归因的一句人话 + 支撑数字**（不是原始日志），`distill_now` 只把「什么时候睡一觉」的时机交给你；教训本身仍然只能由蒸馏器从证据里得出。
+
+```python
+# ⚠️ ObservedPattern 目前尚未在 krow_agent_sdk 命名空间下再导出，需从 runtime
+# 内部路径 import（要求已装 krow-agent-sdk-runtime）。此路径不在 §14 稳定性
+# 承诺范围内，公开再导出前请把它收在你自己的一层薄封装里。
+from modules.agent.self_evolution.observation_sink import ObservedPattern
+
+agent.record_observations([ObservedPattern(
+    kind="retry_storm:invoice_parse",          # 跨夜必须稳定，否则永远凑不满复发阈值
+    summary="发票解析最近 3 次都在 OCR 后的字段校验步重试到超时",  # 原样进蒸馏 prompt
+    evidence={"runs": 3, "step": "field_validate"},
+)])
+stats = agent.distill_now()
+```
+
+`kind` 是最容易写坏的字段：它进 `cluster_key`，同一种模式**跨夜必须给同一个 `kind`**（别把时间戳、run id 拼进去），否则复发计数永远攒不到 `RECUR_THRESHOLD`（3），教训一条也晋级不了。`summary` 会原样进蒸馏 prompt，写「什么在哪儿反复出错」，不要写成指标罗列。另有可选字段 `severity`（`blocking` / `watch`，只影响蒸馏优先级，不做闸门）和 `scope`（`act_name` / `strategy`，跨 ACT 的系统级模式留空）。
+
+**`distill_now()` 对短生命周期进程是必需的**：自动蒸馏由 task-end 触发，但有两道节流——buffer 要够 `MIN_SIGNALS_TO_DISTILL`（4）条、距上次要够 `MIN_DISTILL_INTERVAL_SECONDS`（600）秒。跑完几个任务就退出的宿主进程里，这两道闸意味着蒸馏**几乎永远不发生**：信号靠 spool 一直攒着，却没人来烧。
+
+**feature flag**（见 [§13](#13-环境变量与-feature-flag-速查)）：
+
+| 变量 | 默认 | 取值 |
+|---|---|---|
+| `KROW_SLEEP_PHASE` | `1` | `0` = 关蒸馏；**`shallow` = 蒸馏照常但关深挖**（深挖是慢环最贵的动作，单簇最多 4 次 LLM）；其余 = 全开 |
+| `KROW_OVERLAY_INJECT` | `1` | `0` = 学但不注入 prompt |
+| `KROW_OVERLAY_BEHAVIOR_CHANGE` | `1` | `0` = 只让 info-only 教训晋级，改变执行行为的不晋级 |
+
+> `shallow` 是同一个开关的**第三档**而不是第二个开关：深挖是睡眠期的子行为，两个独立布尔量会立刻长出一个非法组合（深挖开着、睡眠期关着）。
+
+**⚠️ 多进程共享同一 `KROW_DATA_DIR` 时是 last-writer-wins。** overlay 的并发保护是**进程内** `RLock`，不跨进程。多个 Pod 挂同一卷各写各的，后写的整份覆盖先写的——表现为「教训莫名其妙少了几条」，且不报错。单 writer、或每副本独立卷、或走 cloud 后端（kv CAS 换指针）三选一。
+
+完整原理（四段闭环、防膨胀三道闸、晋级门两相分离）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §9「双环元认知与运行时自进化」。
+
+---
+
 ## §10. Telemetry 反向遥测
 
 ```python
@@ -2947,7 +2998,7 @@ finally:
 | `KROW_METACOG_PROVIDER` | `1` | 快环：strained/overload 时注入认知负荷软提示到 prompt |
 | `KROW_GOAL_GAP_FEEDER` | `1` | 快环：预算-目标背离（budget-goal divergence）感知与软提示 |
 | `KROW_OVERLOAD_RESOLVE` | `1` | 快环：overload 时尝试无损过载重整 |
-| `KROW_SLEEP_PHASE` | `1` | 慢环：睡眠期蒸馏（按簇聚类高频信号 → candidate 教训） |
+| `KROW_SLEEP_PHASE` | `1` | 慢环：睡眠期蒸馏（按簇聚类高频信号 → candidate 教训）。三档：`0` 全关 / `shallow` 蒸馏照常但关深挖（省 LLM）/ 其余全开 |
 | `KROW_OVERLAY_INJECT` | `1` | 慢环：把 active overlay 教训按 disclosure_triggers 注入 prompt |
 | `KROW_OVERLAY_BEHAVIOR_CHANGE` | `1` | 慢环：允许 behavior-change 类教训晋级（软启动低权重） |
 | `KROW_OVERLAY_FULL_WEIGHT` | `1` | 慢环：允许 behavior-change 教训长期在线正向后升全权重（否则封顶 0.7） |
