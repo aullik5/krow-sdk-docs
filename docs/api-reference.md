@@ -2806,6 +2806,10 @@ stats = agent.distill_now()
 
 在此之前这条路径是 **fail-open** 的：云端写失败也报成功，经验静默只留在本地。如果你之前据「无报错」判断过云端持久化正常，那个结论不可靠，请按上面两个信号重新确认。
 
+**降级事由现在自证原因（0.9.1.2 起）。** `reason` 从"发生了什么类别的故障"这个层面回答，取值形如 `rejected_bad_request:HTTP 400` / `rejected_quota:HTTP 429` / `server_error:HTTP 503` / `transport_error` / `cas_version_mismatch`，并在 `detail` 里带 `op`（哪个云端操作）、`status`、`server_message`（服务端返回体片段）与 `retriable`。
+
+这条改动是有来由的：`checkpoint` 换指针失败此前一律报 `cas conflict unresolved`，而线上实测**一次真并发冲突都没有**、每次都是服务端 400。两者处置相反——真冲突重读重试是唯一正解，400 重试则永远白烧配额——所以现在也**不再对不可重试的拒绝做等量重试**。若你按旧事由串做过告警规则或看板，请改按 `reason` 前缀匹配。
+
 **共享面是多作者的。** 宿主侧蒸馏器可能与 SDK 慢环写同一份经验存储。跨 pod 召回只读 SDK 慢环自己写的记录（按 `source` 判），宿主记录不按 SDK 的字段契约解读——两边生命周期字段名不同，误读会把宿主**未晋级**或**已判死**的教训当成已确证的外部经验。宿主经验应走宿主自己的注入通道。
 
 完整原理（四段闭环、防膨胀三道闸、晋级门两相分离）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §9「双环元认知与运行时自进化」。
