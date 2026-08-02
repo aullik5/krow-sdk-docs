@@ -71,6 +71,7 @@
   - [§9.7 `actuation` — 让决策脑替你动手（执行面）](#97-actuation--让决策脑替你动手执行面)
   - [§9.8 慢环自进化 — `Agent` 侧读写入口](#98-慢环自进化--agent-侧读写入口)
   - [§9.9 `delivery` — 重提守门](#99-delivery--重提守门)
+  - [§9.10 卡住播报的回应入口 — `Agent.answer_stall`](#910-卡住播报的回应入口--agentanswer_stall)
 - [§10. Telemetry 反向遥测](#10-telemetry-反向遥测)
 - [§11. Test SDK — 开发者写 plugin 的测试工具](#11-test-sdk--开发者写-plugin-的测试工具)
 - [§12. Errors — 错误层与黄金模板](#12-errors--错误层与黄金模板)
@@ -1991,6 +1992,8 @@ for item in agent.run_stream("..."):
 | 认知总线 | `cognitive.decision_conflict` | `beat` / `pair` / `decision` / `delta` |
 | 认知总线 | `cognitive.actuated` | `decision` / `kind` / `authority` / `beat` / `fires` |
 | 认知总线 | `cognitive.sensor_dead` | `beat` / `sensor` / `applicable_beats` / `beats` / `errors` |
+| 认知总线 | `cognitive.stalled` | `kind` / `headline` / `detail` / `exits` / `actionable` / `beat`（headless 唯一的"在原地打转"信号；回答走 [§9.10](#910-卡住播报的回应入口--agentanswer_stall)） |
+| 认知总线 | `cognitive.stall_user_choice` | `choice` / `note`（**回灌腿**，请用 `Agent.answer_stall` 发，别自己拼 topic） |
 | 慢环 | `self_evolution.proposal_ready` | `act_name` / `path` / `candidates` / `has_findings` |
 | 慢环 | `self_evolution.learning_snapshot` | `distilled` / `promoted` / `carried_in` / `injected` / `rooted` / `hypotheses` |
 
@@ -2857,6 +2860,37 @@ if not verdict["accepted"]:
 > ⚠️ **豁免不是通行证。** 它只免掉 `missing_verification_metadata` 一条，其余三条照常生效。最容易被误判的是 `self_referential`：纯格式重提若把正文逐字节原样再交一遍，**仍然会被挡下**。这是对的——"只改格式"意味着正文应当有变化（哪怕只是换行与缩进），而一个字节都没动的重提与"没做事"在机制层无法区分，那正是本闸要治的空转。
 
 **只判不改**：本函数不会重写 `submission`、不会替它补 `read_ops`。系统替它补一份核验记录出来，就是在伪造证据链。语义级的"改了但没改到点上"归你的复核环节（System 2），机制层不越界替它判。
+### §9.10 卡住播报的回应入口 — `Agent.answer_stall`
+
+桌面版卡住时会弹一条横幅带几个按钮；headless / SDK 宿主没有横幅，`cognitive.stalled` 就是它们唯一的"系统在原地打转"信号。收到之后要能**答**——否则系统只是在问一个没人能回答的问题，然后一路转到预算耗尽（0.9.1.1 及之前就是这个状态：公共门面根本发不出回灌 topic）。
+
+```python
+for item in agent.run_stream("……"):
+    if item.kind != "event" or item.event.type != "cognitive.stalled":
+        continue
+    p = item.event.payload
+    show_to_user(p["headline"], p["detail"])        # 展示给终端用户
+    if not p["actionable"]:
+        continue                                    # 没有出口 = 纯通知，别渲染按钮
+    if "add_context" in p["exits"] and have_hint:
+        agent.answer_stall("add_context", note="第 3 章有线索")
+    else:
+        agent.answer_stall("wrap_up_now")
+```
+
+| 项 | 约定 |
+|---|---|
+| 签名 | `Agent.answer_stall(choice: str, note: str \| None = None) -> bool` |
+| `choice` | 只能取播报 payload 里 `exits` 列出的值：`add_context` / `wrap_up_now` / `keep_going`。**非法取值 fail-loud 抛 `ValueError` 并点名合法取值**——静默丢弃会让你以为已经答过了 |
+| `note` | `add_context` 的线索正文，会进下一拍 prompt（权重高于系统提示）。该出口不带 note = 不采纳 |
+| 返回值 | `True` = 执行器确认采纳。`False` 的三种成因各有 WARNING 日志：当前没人订阅回灌腿（还没收到播报、或本次 run 已结束）／执行器收到但拒绝／宿主装了线程派发桥导致拿不到受理回执 |
+| 时机 | 只在**收到 `cognitive.stalled` 之后、本次 run 结束之前**有效（消费端是在播报时惰性绑定的） |
+| 失败姿态 | 除非法 `choice` 外一律 fail-soft，不抛（回答一条播报不该反噬主链路） |
+| 已知边界 | 回灌 topic 是**进程级**的：同一进程内跑多个 `Agent` 时，一次回答会到达当前所有已绑定的执行器（桌面横幅同理）。需要按 run 定向的场景请先开 issue，别自己在 payload 里塞路由字段 |
+
+**别在宿主侧硬编码"一律 `wrap_up_now`"**：出口是按卡住种类给的——`blind_spot`（信息不足）把 `add_context` 排在推荐位，`conclude_blocked`（约束冲突）把 `wrap_up_now` 排在推荐位，`actionable=False` 的降级结案一个出口都不给。合理的策略分级是"第一次停滞给上下文、再次停滞收尾"，照 `exits` 的顺序取首项即可拿到推荐项。
+
+**为什么不是 `event_bus.publish(...)`**：`EventBusReader` 是[只读](#61-eventbusreader)的，这是它存在的理由（plugin 只能读、不能反向写主流程）。开一个通用 publish 等于把只读读者变成任意写者；带白名单也一样——白名单会稳定增长，而 topic 是字符串、校验不了语义。所以控制路径上每加一种能力，就加一个语义窄、可校验、能回报结果的具名方法。同理**不要**去碰任何私有属性拼这条通路：那不在 [§14](#14-版本兼容性--稳定性--deprecation) 的稳定性承诺内。
 
 ---
 
