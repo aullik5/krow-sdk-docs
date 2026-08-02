@@ -1998,7 +1998,24 @@ for item in agent.run_stream("..."):
 | 慢环 | `self_evolution.learning_snapshot` | `distilled` / `promoted` / `carried_in` / `injected` / `rooted` / `hypotheses` |
 
 > **铁律**：表中 topic 在 SemVer 内稳定。**其他 topic** 仍可订阅（EventBus 是开放的），但**不在 SemVer 稳定保证内** — 主仓 refactor 可能 break。
-> `cognitive.*` 的全量清单（含执行器面、上行监测面、内感受面共 20 条）SSOT 在 `modules/agent/progressive/cognitive_topics.py:COGNITIVE_TOPICS`；上表只列**稳定保证内**的那些。SDK `AgentBuilder` 默认订阅其中一个子集，见 §9.6。
+> `cognitive.*` 的全量清单（含执行器面、上行监测面、内感受面）SSOT 在 `modules/agent/progressive/cognitive_topics.py:COGNITIVE_TOPICS`；上表只列**稳定保证内**的那些。SDK `AgentBuilder` 默认订阅其中一个子集，见 §9.6。
+
+#### `cognitive.*` 的保底 `reason` 契约（0.9.1.2 起）
+
+**所有** `cognitive.*` 事件的 payload 都保底带一个 `reason`（字符串，非空），集成方**不必再逐 topic 猜事由键名**。
+
+背景：事由此前在每个 topic 上叫的名字都不一样 —— `decision_wake` / `decision_feedback` 叫 `reason`，`cognitive.stalled` 叫 `headline` / `detail`，执行面事件叫 `decision`。只按 `reason` 一族渲染的宿主会把后两类帧显示成「未携带事由」：事件留下了、事由丢了。
+
+契约的四条边界，请按这个来写渲染器：
+
+| 保证 | 含义 |
+|---|---|
+| **并存，不是替换** | 领域键（`headline` / `detail` / `decision` / `classification` / `pair` …）**一个都不动**。已经按旧键名写好的渲染器继续有效，`reason` 对它们是无害冗余。 |
+| **领域自带的优先** | payload 本来就带非空 `reason`（如 `decision_wake` 的唤醒事由）时**不覆盖** —— 领域值比派生值精确。 |
+| **值一定有意义** | 事由从该 topic **自己已有的语义字段**派生：`stalled` 取 `headline`，执行面取 `decision`，`sensor_dead` 取 `sensor=<轴> applicable_beats=<n>`，`expectation_settled` 取三态分布 `outcome=confirmed:2,violated:1`。**不会**出现 `unknown` / 空串 / topic 名本身这类占位值。 |
+| **只覆盖本命名空间** | `progressive.*` / `react.*` / `budget.*` 等不受影响，不会被塞入 `reason`。 |
+
+事由长度上限 200 字符。派生规则的 SSOT（topic → 事由来源字段）在 `modules/agent/progressive/cognitive_reason.py:REASON_RECIPES`，注入点是 `modules/events/bus.py:EventBus.publish` 这一个出口 —— 新增 topic 必须同时登记事由来源，否则契约测试 `tests/progressive/test_cognitive_reason_contract.py` 当场红。
 
 ---
 
