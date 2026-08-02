@@ -70,6 +70,7 @@
   - [§9.6 `metacognition` — 配置决策脑三注册表](#96-metacognition--配置决策脑三注册表)
   - [§9.7 `actuation` — 让决策脑替你动手（执行面）](#97-actuation--让决策脑替你动手执行面)
   - [§9.8 慢环自进化 — `Agent` 侧读写入口](#98-慢环自进化--agent-侧读写入口)
+  - [§9.9 `delivery` — 重提守门](#99-delivery--重提守门)
 - [§10. Telemetry 反向遥测](#10-telemetry-反向遥测)
 - [§11. Test SDK — 开发者写 plugin 的测试工具](#11-test-sdk--开发者写-plugin-的测试工具)
 - [§12. Errors — 错误层与黄金模板](#12-errors--错误层与黄金模板)
@@ -2813,6 +2814,49 @@ stats = agent.distill_now()
 **共享面是多作者的。** 宿主侧蒸馏器可能与 SDK 慢环写同一份经验存储。跨 pod 召回只读 SDK 慢环自己写的记录（按 `source` 判），宿主记录不按 SDK 的字段契约解读——两边生命周期字段名不同，误读会把宿主**未晋级**或**已判死**的教训当成已确证的外部经验。宿主经验应走宿主自己的注入通道。
 
 完整原理（四段闭环、防膨胀三道闸、晋级门两相分离）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §9「双环元认知与运行时自进化」。
+
+---
+
+### §9.9 `delivery` — 重提守门
+
+```python
+from krow_agent_sdk.delivery import guard_resubmission, REVISION_REQUIRED_METADATA
+```
+
+做「打回—重提」编排时会遇到这种形态：件被打回后重提，而重提件与上一版**逐字节相同**——它没有回去重读证据，只是把原话又说了一遍。宿主此前只能人肉比对两版正文，于是同一件在打回与重提之间来回好几轮，预算烧光而内容没动。
+
+`guard_resubmission` 把这条守门提升为公共 API。它**只认 `revision_of` 这个契约形状**（「这一件声称是某一件的修订版」），不认识"裁决"/"报告"/"改稿"——PPT 改稿、wiki 重编、报告返工、裁决重提都是同一个形状。三条判据全是**结构判据**，不读正文语义，因此零 token、毫秒级、可 100% 单测覆盖。
+
+| 函数 / 常量 | 签名 | 用途 |
+|---|---|---|
+| `guard_resubmission(submission, previous=None, *, verification_required=True)` | `-> dict` | 判一件重提。返回 `{"accepted": bool, "violations": [code, ...], "detail": {...}}` |
+| `REVISION_REQUIRED_METADATA` | `("read_ops",)` | 重提件必须携带的核验元数据键 |
+
+`submission` 形状 `{"submission_id", "revision_of", "content", "read_ops": [...]}`。不带 `revision_of` = 首次提交，直接放行并在 `detail.first_submission` 如实标注（不谎称"过了重提守门"）。拿不到上一版时 `previous=None`，逐字节比对与不可变判据跳过、`detail.previous_unavailable=True`——**不会**因为看不到上一版就假装通过了全部判据。
+
+| 违约码 | 含义 |
+|---|---|
+| `missing_verification_metadata` | 重提件没带 `read_ops` —— 无法证明它回去看过 |
+| `self_referential` | 重提正文与上一版逐字节相同 —— 换个说法都没换 |
+| `mutated_previous` | 上一版被就地改写 —— 重提应当是**新增**一件，不是改旧件 |
+| `revision_target_mismatch` | `revision_of` 指向的不是传进来的那一件 |
+
+**唯一一条豁免：`verification_required=False`。** 宿主发起「只重排格式、**明确禁止**重新核验」的重提时，既禁止它去读、又要求它证明读过，就自相矛盾，会把一条正当的自愈路径整个堵死。此时 `detail.verification_waived=True`。
+
+```python
+verdict = guard_resubmission(
+    submission={"submission_id": "v2", "revision_of": "v1",
+                "content": reformatted_text, "read_ops": []},
+    previous={"submission_id": "v1", "content": original_text},
+    verification_required=False,        # 本轮宿主禁止重新核验
+)
+if not verdict["accepted"]:
+    reject(reasons=verdict["violations"])   # 原样回传，组员才知道该补什么
+```
+
+> ⚠️ **豁免不是通行证。** 它只免掉 `missing_verification_metadata` 一条，其余三条照常生效。最容易被误判的是 `self_referential`：纯格式重提若把正文逐字节原样再交一遍，**仍然会被挡下**。这是对的——"只改格式"意味着正文应当有变化（哪怕只是换行与缩进），而一个字节都没动的重提与"没做事"在机制层无法区分，那正是本闸要治的空转。
+
+**只判不改**：本函数不会重写 `submission`、不会替它补 `read_ops`。系统替它补一份核验记录出来，就是在伪造证据链。语义级的"改了但没改到点上"归你的复核环节（System 2），机制层不越界替它判。
 
 ---
 
