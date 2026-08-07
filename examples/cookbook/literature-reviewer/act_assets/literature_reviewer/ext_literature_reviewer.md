@@ -58,13 +58,23 @@
 - LLM 应：把 paper abstract 用自己的话改写（paraphrase），不直接复制
 - 引用格式：[N] 数字风格 / (Author, Year) 作者-年份风格 任选其一
 
-### 7. **`literature_reviewer_detect_plagiarism_overlap(review_text, source_texts)`** — 抄袭检测
+### 7. **`smart_file_write(operation='write', path=<综述.md>, content=<完整 markdown>)`** — 先落盘
 
-- 输入：综述 markdown + {paper_id: abstract} 字典
-- 默认 5-gram word + 60% 阈值
+- **`operation` 只用 `write`**：`write` 天然覆盖同名文件，重写多少次都安全。
+  用 `create` 写第二次会撞 `文件已存在 … 请设置 overwrite=true` 硬闸（那道闸是
+  保护用户手改过的文件，不是给你绕的）。
+- **`content` 必须是完整正文**：写空正文会被 `empty_content_gate` 直接拒绝
+  （工具不会落 0 字节文件冒充交付物）。正文太长被截断 → 先 `write` 首段，
+  再 `append` 续写，不要重试同一次空写。
+
+### 8. **`literature_reviewer_detect_plagiarism_overlap(review_path, source_texts)`** — 抄袭检测
+
+- 输入：**综述 markdown 的路径**（step 7 刚落盘的那个）+ {paper_id: abstract} 字典
+  - 传 `review_path` 让工具自己读文件；只有综述还没落盘时才传 `review_text` 全文
+- 默认 5-gram word + 60% 阈值（别名 `n_gram` / `threshold` 同样接受）
 - **PlagiarismGate 守门触发**：flagged_sources 非空 → BLOCK conclude
 
-### 8. **如 Gate BLOCK：根据 reason 修改综述 → 重写 markdown → 重检测**
+### 8b. **如 Gate BLOCK：根据 reason 修改综述 → 用 `write` 覆盖重写 → 重检测**
 
 - CitationCompletenessGate BLOCK → 看缺哪几段引用 → 补齐
 - PlagiarismGate BLOCK → 找命中段落 → 用自己的话改写
@@ -130,6 +140,9 @@ BudgetSpec(
 | ❌ 用 hint 教 LLM "请加引用" 替代 Gate | ✅ 学术规范红线必须 System 1 闸住 |
 | ❌ 在 cookbook 加 python-docx / fpdf2 自己渲文档 | ✅ 调 `word_smart_export`（SSOT 复用） |
 | ❌ 不聚类直接让 LLM 写综述章节 | ✅ 先聚类得到 outline，按主题展开 |
+| ❌ 用 `create` 重写综述 → 撞 FILE_EXISTS 原地重试 | ✅ 重写一律 `operation='write'`（覆盖语义） |
+| ❌ 正文没准备好就先 `write` 一个空文件占位 | ✅ 空正文会被 `empty_content_gate` 拒；准备好再写 |
+| ❌ 把整篇综述再复述一遍塞进 `review_text` | ✅ 已落盘就传 `review_path`，System 1 读文件 |
 
 ## 引用
 

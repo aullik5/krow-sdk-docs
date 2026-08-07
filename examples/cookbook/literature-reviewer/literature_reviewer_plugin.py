@@ -74,6 +74,78 @@ def _golden_error(
     return {"ok": False, "error": "\n".join(parts)}
 
 
+def _coerce_json_payload(value: Any) -> Any:
+    """LLM 常把结构化入参写成 JSON 字符串；先解一层再判类型。
+
+    2026-08-06 SDK nightly 铁证（run 31106693210 · literature-reviewer）：
+    ``Tool execution failed: 'str' object has no attribute 'get'`` —— 旧实现对
+    ``papers`` / ``edges`` 直接 ``p.get(...)``，模型传进来的是字符串（JSON 文本或
+    一串 paper_id）时就抛裸 ``AttributeError``。裸异常对模型是不可修复信号
+    （没说哪个参数、也没说该传什么），于是它换个姿势再试，一路耗到墙钟。
+
+    本函数只做**语法**归一（System 1），不猜语义：解不出来原样返回，交给调用方
+    走黄金模板 fail-loud。
+    """
+    if isinstance(value, (str, bytes)):
+        try:
+            return json.loads(value)
+        except Exception:  # noqa: BLE001 - 不是 JSON 就原样交回给类型闸判
+            return value
+    return value
+
+
+def _coerce_dict_list(value: Any, *, param: str, where: str) -> Any:
+    """把入参归一成 ``list[dict]``；形状不对 → 黄金模板错误 dict（非异常）。
+
+    Returns:
+        ``list[dict]``（成功）或 ``{"ok": False, "error": ...}``（失败）。
+    """
+    value = _coerce_json_payload(value)
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        return _golden_error(
+            f"{param} 必须是对象数组，实际收到 {type(value).__name__}",
+            where=where,
+            fixes=[
+                f"{param}=[{{...}}, {{...}}]（每项是一个对象，不是字符串）",
+                f"别传 {param} 的 JSON 字符串以外的裸文本",
+            ],
+        )
+    bad = [i for i, item in enumerate(value) if not isinstance(item, dict)]
+    if bad:
+        sample = value[bad[0]]
+        return _golden_error(
+            f"{param}[{bad[0]}] 必须是对象，实际是 {type(sample).__name__}"
+            f"（共 {len(bad)}/{len(value)} 项不合规）",
+            where=where,
+            fixes=[
+                f"{param} 的每一项要传完整对象而不是 id 字符串",
+                "papers 请直接传 extract_paper_metadata 的输出对象",
+                "edges 请传 [{\"from\": paper_id_A, \"to\": paper_id_B}, ...]",
+            ],
+        )
+    return value
+
+
+def _coerce_str_mapping(value: Any, *, param: str, where: str) -> Any:
+    """把入参归一成 ``dict``；形状不对 → 黄金模板错误 dict（非异常）。"""
+    value = _coerce_json_payload(value)
+    if not isinstance(value, dict):
+        return _golden_error(
+            f"{param} 必须是对象映射，实际收到 {type(value).__name__}",
+            where=where,
+            fixes=[
+                f"{param}={{paper_id: text}}（键是 paper_id，值是正文/abstract）",
+            ],
+        )
+    return value
+
+
+def _is_error_payload(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("ok") is False
+
+
 def _scan_pdf_text(path: Path) -> str:
     """从 PDF 抽全文（与 financial-analyst 保持一致 API）."""
     try:
@@ -133,20 +205,33 @@ _REF_ENTRY_RE = re.compile(
 
 
 def extract_paper_metadata(
-    path: str | Path,
+    path: str | Path | None = None,
     paper_id: str | None = None,
+    file_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """从 paper PDF 抽元数据.
 
     Args:
         path: PDF 路径
         paper_id: 显式 ID（None 则用 sha1(path) 前 12 位 + 文件名 stem）
+        file_path: ``path`` 的同义别名。**必须在 input_schema 里声明**——
+            ProgressiveExecutor 会把 planner constraints 里不在 schema 的键静默
+            drop（``planner constraints drop 1 unknown keys … ['file_path']``），
+            未声明的别名到不了这里。TURBO 总则①：从 LLM 的近端语义字段推导，
+            不要求模型记住"系统接口"叫什么。
 
     Returns:
         dict 含 ok/summary/paper_id/title/authors/year/abstract/keywords/
         ref_count/source
     """
-    p = _normalize_path(path)
+    raw_path = path if path not in (None, "") else file_path
+    if raw_path in (None, ""):
+        return _golden_error(
+            "缺少必需参数 path",
+            where="extract_paper_metadata",
+            fixes=["path=<paper PDF 绝对路径>（别名 file_path 同样接受）"],
+        )
+    p = _normalize_path(raw_path)
     if not p.exists():
         return _golden_error(
             f"PDF 不存在：{p}",
@@ -359,6 +444,11 @@ def cluster_papers_by_topic(
             fixes=["先用 extract_paper_metadata 抽元数据"],
             related=["extract_paper_metadata"],
         )
+    papers = _coerce_dict_list(
+        papers, param="papers", where="cluster_papers_by_topic",
+    )
+    if _is_error_payload(papers):
+        return papers
     if len(papers) < 2:
         return _golden_error(
             f"至少 2 篇 paper 才能聚类（目前 {len(papers)} 篇）",
@@ -493,6 +583,24 @@ def build_citation_graph(
             where="build_citation_graph",
             fixes=["先用 extract_paper_metadata 抽元数据"],
         )
+    papers = _coerce_dict_list(
+        papers, param="papers", where="build_citation_graph",
+    )
+    if _is_error_payload(papers):
+        return papers
+    edges = _coerce_dict_list(
+        edges or [], param="edges", where="build_citation_graph",
+    )
+    if _is_error_payload(edges):
+        return edges
+    if cluster_assignments is not None:
+        cluster_assignments = _coerce_str_mapping(
+            cluster_assignments,
+            param="cluster_assignments",
+            where="build_citation_graph",
+        )
+        if _is_error_payload(cluster_assignments):
+            return cluster_assignments
 
     paper_index = {
         p.get("paper_id", f"paper_{i}"): p for i, p in enumerate(papers)
@@ -622,11 +730,14 @@ def _build_ngrams(text: str, n: int = 5) -> set[str]:
 
 
 def detect_plagiarism_overlap(
-    review_text: str,
-    source_texts: dict[str, str],
+    review_text: str | None = None,
+    source_texts: dict[str, str] | None = None,
     *,
     ngram: int = 5,
     overlap_threshold: float = 0.6,
+    review_path: str | Path | None = None,
+    n_gram: int | None = None,
+    threshold: float | None = None,
 ) -> dict[str, Any]:
     """检测综述文本与原文的 n-gram 重叠率.
 
@@ -635,17 +746,47 @@ def detect_plagiarism_overlap(
         source_texts: ``{paper_id: full_text_or_abstract}``
         ngram: n-gram 大小（默认 5-gram word）
         overlap_threshold: 警告阈值（默认 0.6 = 60%）
+        review_path: ``review_text`` 的替代入口——综述已落盘时传路径即可，
+            由 System 1 读文件，不必让模型把整篇 markdown 再复述一遍进 prompt。
+        n_gram / threshold: ``ngram`` / ``overlap_threshold`` 的同义别名。
+            与 ``extract_paper_metadata.file_path`` 同理，别名必须在 input_schema
+            里声明才到得了这里（否则被 planner constraints 过滤器 drop）。
 
     Returns:
         dict 含 ok/summary/per_source（每篇 source 的 overlap_ratio 和命中
         ngram 列表）/ flagged_sources（≥ 阈值的列表）
     """
+    if isinstance(n_gram, int) and n_gram > 0:
+        ngram = n_gram
+    if isinstance(threshold, (int, float)) and threshold > 0:
+        overlap_threshold = float(threshold)
+    if not review_text and review_path:
+        rp = _normalize_path(review_path)
+        if not rp.exists():
+            return _golden_error(
+                f"review_path 不存在：{rp}",
+                where=f"review_path={review_path}",
+                fixes=[
+                    "确认综述 markdown 已经落盘（smart_file_write 返回 success）",
+                    "或改传 review_text=<综述全文>",
+                ],
+            )
+        review_text = rp.read_text(encoding="utf-8", errors="replace")
     if not review_text:
         return _golden_error(
             "review_text 为空",
             where="detect_plagiarism_overlap",
-            fixes=["先生成综述章节再调本工具"],
+            fixes=[
+                "先生成综述章节再调本工具",
+                "综述已落盘 → 传 review_path=<综述 markdown 路径> 由工具自己读",
+            ],
         )
+    if source_texts:
+        source_texts = _coerce_str_mapping(
+            source_texts, param="source_texts", where="detect_plagiarism_overlap",
+        )
+        if _is_error_payload(source_texts):
+            return source_texts
     if not source_texts:
         return _golden_error(
             "source_texts 为空",
@@ -749,6 +890,7 @@ def generate_review_outline(
     Returns:
         dict 含 ok/summary/outline（list of {section, description, citations_required}）
     """
+    cluster_result = _coerce_json_payload(cluster_result)
     if not isinstance(cluster_result, dict) or not cluster_result.get("ok"):
         return _golden_error(
             "cluster_result 不是有效的 cluster_papers_by_topic 输出",
@@ -771,6 +913,11 @@ def generate_review_outline(
             where="generate_review_outline",
             fixes=["先聚类得到至少 1 个 topic"],
         )
+    clusters = _coerce_dict_list(
+        clusters, param="cluster_result.clusters", where="generate_review_outline",
+    )
+    if _is_error_payload(clusters):
+        return clusters
 
     # 自动决策 timeline 章节
     all_years: list[int] = []
@@ -862,8 +1009,15 @@ class LiteratureReviewerToolPlugin:
                     "properties": {
                         "path": {"type": "string"},
                         "paper_id": {"type": "string"},
+                        # 别名必须**声明**才到得了 handler：ProgressiveExecutor 的
+                        # planner constraints 过滤器按 input_schema.properties 白
+                        # 名单过（``drop … unknown keys … ['file_path']``）。
+                        "file_path": {
+                            "type": "string",
+                            "description": "path 的同义别名（二选一）",
+                        },
                     },
-                    "required": ["path"],
+                    "required": [],
                 },
                 "handler": extract_paper_metadata,
             },
@@ -917,19 +1071,39 @@ class LiteratureReviewerToolPlugin:
                     "n-gram 重叠检测综述与原文（学术不端守门）。"
                     "默认 5-gram word + 60% 阈值；命中即 PlagiarismGate 触发 BLOCK。"
                     "**铁律**：综述不允许大段抄原文（≥60% n-gram overlap）。"
+                    "综述已落盘 → 传 review_path=<markdown 路径>（推荐，省 token）；"
+                    "还没落盘 → 传 review_text=<全文>。二者至少给一个。"
                 ),
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "review_text": {"type": "string"},
+                        "review_path": {
+                            "type": "string",
+                            "description": (
+                                "综述 markdown 路径（review_text 的替代入口，"
+                                "已落盘就传路径，工具自己读，不必复述全文）"
+                            ),
+                        },
                         "source_texts": {
                             "type": "object",
                             "description": "{paper_id: text}（用 abstract 即可）",
                         },
                         "ngram": {"type": "integer", "default": 5},
                         "overlap_threshold": {"type": "number", "default": 0.6},
+                        # 同 extract_paper_metadata.file_path：别名不声明就被
+                        # planner constraints 过滤器 drop（真机日志
+                        # ``drop 2 unknown keys … ['threshold', 'n_gram']``）。
+                        "n_gram": {
+                            "type": "integer",
+                            "description": "ngram 的同义别名",
+                        },
+                        "threshold": {
+                            "type": "number",
+                            "description": "overlap_threshold 的同义别名",
+                        },
                     },
-                    "required": ["review_text", "source_texts"],
+                    "required": ["source_texts"],
                 },
                 "handler": detect_plagiarism_overlap,
             },

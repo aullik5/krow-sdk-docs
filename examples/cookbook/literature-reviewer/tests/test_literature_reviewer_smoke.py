@@ -640,3 +640,145 @@ def test_progress_listener_counts_gate_blocks() -> None:
     listener._on_gate_blocked(Ev({"gate_name": "citation_completeness"}))
     listener._on_gate_blocked(Ev({"gate_name": "plagiarism"}))
     assert listener._gate_blocks == 2
+
+
+# ════════════════════════════════════════════════════════════════════════
+# §9. 入参形状鲁棒性（2026-08-06 sdk-nightly run 31106693210 回归）
+#
+# 真机 stderr：``Tool execution failed: 'str' object has no attribute 'get'``
+# —— 模型给 papers / edges 传了字符串（JSON 文本或一串 paper_id），旧实现直接
+# ``p.get(...)`` 抛裸 AttributeError。裸异常对模型是不可修复信号（没说哪个参数、
+# 也没说该传什么），它只能换个姿势再试，一路耗到 600s 墙钟。
+# ════════════════════════════════════════════════════════════════════════
+
+
+_PAPERS = [
+    {"paper_id": "a", "title": "graph neural recommendation",
+     "abstract": "graph neural network recommendation embedding", "year": 2020},
+    {"paper_id": "b", "title": "graph embedding recommendation",
+     "abstract": "graph neural network recommendation embedding", "year": 2021},
+]
+
+
+def test_cluster_rejects_string_items_with_golden_error() -> None:
+    """papers 传成 id 字符串列表 → 黄金模板 fail-loud，不抛 AttributeError。"""
+    res = lr.cluster_papers_by_topic(["paper_a", "paper_b"])
+    assert res["ok"] is False
+    assert "papers[0]" in res["error"]
+    assert "对象" in res["error"]
+
+
+def test_cluster_accepts_json_string_payload() -> None:
+    """papers 传成 JSON 字符串 → System 1 解一层，正常聚类。"""
+    res = lr.cluster_papers_by_topic(
+        json.dumps(_PAPERS), similarity_threshold=0.05,
+    )
+    assert res["ok"] is True
+    assert res["n_papers"] == 2
+
+
+def test_citation_graph_rejects_string_edges_with_golden_error() -> None:
+    res = lr.build_citation_graph(_PAPERS, ["a->b"])
+    assert res["ok"] is False
+    assert "edges[0]" in res["error"]
+
+
+def test_citation_graph_rejects_string_papers_with_golden_error() -> None:
+    res = lr.build_citation_graph(["a", "b"], [])
+    assert res["ok"] is False
+    assert "papers[0]" in res["error"]
+
+
+def test_outline_rejects_string_clusters_with_golden_error() -> None:
+    res = lr.generate_review_outline({"ok": True, "clusters": ["topic_000"]})
+    assert res["ok"] is False
+    assert "cluster_result.clusters[0]" in res["error"]
+
+
+def test_plagiarism_rejects_string_source_texts_with_golden_error() -> None:
+    res = lr.detect_plagiarism_overlap(
+        review_text="some review text here", source_texts="a bunch of prose",
+    )
+    assert res["ok"] is False
+    assert "source_texts" in res["error"]
+
+
+# ── 别名必须能到达 handler（planner constraints 过滤器按 schema 白名单过）──
+#
+# 真机 stderr：``planner constraints drop 1 unknown keys for tool
+# …_extract_paper_metadata (not in input_schema): ['file_path']`` /
+# ``… drop 2 unknown keys … ['threshold', 'n_gram']``。声明了别名却没写进
+# input_schema = 别名等于不存在（反模式 A：声明≠生效）。
+
+
+def _schema_of(tool_name: str) -> dict:
+    for t in lr.LiteratureReviewerToolPlugin().get_tools():
+        if t["name"] == tool_name:
+            return t["input_schema"]
+    raise AssertionError(f"工具未注册：{tool_name}")
+
+
+def test_declared_aliases_are_in_input_schema() -> None:
+    meta_props = _schema_of(
+        "literature_reviewer_extract_paper_metadata",
+    )["properties"]
+    assert "file_path" in meta_props, (
+        "file_path 没进 input_schema → 会被 planner constraints 过滤器 drop，"
+        "handler 永远收不到"
+    )
+    plag_props = _schema_of(
+        "literature_reviewer_detect_plagiarism_overlap",
+    )["properties"]
+    for alias in ("n_gram", "threshold", "review_path"):
+        assert alias in plag_props, f"{alias} 没进 input_schema"
+
+
+def test_extract_metadata_accepts_file_path_alias(tmp_path: Path) -> None:
+    f = tmp_path / "doc.txt"
+    f.write_text("hello")
+    res = lr.extract_paper_metadata(file_path=f)
+    # 走到了"非 PDF"这一步 = 别名确实被当成路径用了（而不是报缺参）
+    assert res["ok"] is False
+    assert "非 PDF" in res["error"]
+
+
+def test_extract_metadata_without_any_path_fails_loud() -> None:
+    res = lr.extract_paper_metadata()
+    assert res["ok"] is False
+    assert "缺少必需参数 path" in res["error"]
+
+
+def test_plagiarism_alias_thresholds_take_effect() -> None:
+    shared = "the quick brown fox jumps over the lazy dog again and again"
+    strict = lr.detect_plagiarism_overlap(
+        review_text=shared, source_texts={"p1": shared},
+        n_gram=5, threshold=0.99,
+    )
+    loose = lr.detect_plagiarism_overlap(
+        review_text=shared, source_texts={"p1": shared},
+        n_gram=5, threshold=0.1,
+    )
+    assert strict["ngram"] == 5 and loose["ngram"] == 5
+    assert strict["overlap_threshold"] == 0.99
+    assert loose["overlap_threshold"] == 0.1
+    assert loose["flagged_sources"] == ["p1"]
+
+
+def test_plagiarism_reads_review_from_path(tmp_path: Path) -> None:
+    """综述已落盘 → 传 review_path 即可，不必把全文再复述进 prompt。"""
+    body = "the quick brown fox jumps over the lazy dog again and again"
+    md = tmp_path / "review.md"
+    md.write_text(body, encoding="utf-8")
+    res = lr.detect_plagiarism_overlap(
+        review_path=md, source_texts={"p1": body}, threshold=0.1,
+    )
+    assert res["ok"] is True
+    assert res["flagged_sources"] == ["p1"]
+
+
+def test_plagiarism_missing_review_path_fails_loud(tmp_path: Path) -> None:
+    res = lr.detect_plagiarism_overlap(
+        review_path=tmp_path / "nope.md", source_texts={"p1": "x"},
+    )
+    assert res["ok"] is False
+    assert "review_path 不存在" in res["error"]

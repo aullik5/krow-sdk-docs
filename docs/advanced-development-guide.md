@@ -22,7 +22,7 @@
 | §3 | ToolPlugin 设计哲学（功能强大 + Agent 友好接口） | 写 ToolPlugin |
 | §4 | ACTPlugin / extended.md 编写最佳实践 | 写 ACTPlugin |
 | §5 | HintPlugin / GatePlugin / EventListener 边界 | 写其它 plugin |
-| §6 | 关键基础设施速查（公开 SDK 暴露的接口） | 写代码时按需 |
+| §6 | 关键基础设施速查（公开 SDK 暴露的接口；§6.8 = 策略自动路由的默认行为与开关） | 写代码时按需 |
 | §7 | 测试方法论（Plugin 单测 + record/replay + 真实 LLM 验证） | 验收前 |
 | §8 | 反模式黑名单（铁证支撑） | 写完前 review |
 | §9 | 双环元认知与运行时自进化（快环软提示 + 慢环睡眠蒸馏 / overlay） | 想观测/维护 agent 自进化 |
@@ -1635,6 +1635,55 @@ agent = (
 ```
 
 > **安全**：默认关闭防 supply-chain（恶意 wheel install 自动注入 plugin）。打开 entry_points 自动扫描 = 信任 PyPI 上所有装的 wheel；生产建议保持显式 `.with_<type>_plugin(...)`。
+
+### 6.8 策略自动路由：引擎默认会做什么，怎么关（0.9.1.4 起）
+
+这是**唯一一处引擎会替你的 plugin 做语义决策**的地方，值得单独读一遍。
+
+**引擎在做什么**：`task_context` 里没有 `strategy` 时，引擎会用一次轻量 LLM 分类判断"这是不是一道推理题、该走哪套方法论"。命中具体推理策略（如 `hypothesis_test` 竞争假设分析）时会给这个 run 挂上对应的**契约**：plan 阶段的相位硬门、conclude 阶段的合规门、推理级墙钟预算。
+
+**为什么你需要知道**：契约里的硬门会**要求 LLM 调用该方法论的记账工具**（ACH 族的 `propose_hypothesis` / `add_evidence` / `recompute_ach_matrix` 等）。这些工具由主仓注册，即使不在你 ACT 声明的工具集里，LLM 也调得到 —— 于是你会在日志里看到大量与业务无关的工具调用。真实案例：一个海关 HS 归类 plugin，问题"该报哪个 HS"被判成"多候选里锁定唯一答案"= 竞争假设分析，31 次工具调用里 20 次是 ACH 记账。
+
+**0.9.1.4 起的默认行为（多数 plugin 什么都不用做）**：
+
+| 你的 `task_context` | 引擎行为 |
+| --- | --- |
+| 带 `act_name` / `capability` / `lock_act` 任一 | **不路由**（认为你已经决定了这轮干什么） |
+| 显式传了 `strategy` | 不路由（指定即采用） |
+| 什么都没带（裸调用） | 路由；但猜出来的策略只享**基础墙钟**，不给 8h 长跑弹性 |
+| 声明了 `tool_universe="act_only"` | 额外校验：策略硬门要的工具不在你的 ACT 工具集里 → 不采用该策略 |
+
+**0.9.1.6 追加的两条（都不需要你改代码，默认生效）**：
+
+*查询类问题不再进推理管线*。路由器的意图分类新增了一类 `lookup`，判据是**答案从哪来**而不是**问题难不难**：答案已经写在手册/标准/税则/知识库里、任务是查出来并按规则套用 → `lookup`；答案不在任何单份资料里、必须跨来源提假设再排除才能得出 → `reasoning`。判为 `lookup` 的问题不会被挂推理契约，也不会吃"至少 N 条假设 + 逐条挑战"的 ACH 纪律，改为收到一段"走最短检索路径、优先用你的专用查询工具、结论给出依据出处"的软引导。上面那个 HS 归类的例子正落在这一类里。
+
+注意这条**只影响引导与契约，不替你做业务判断**：`lookup` 仍然会去查资料、仍然走完整的 plan/run 流程，只是不再按情报分析的方法论展开。
+
+*墙钟按入口分档*。8 小时那档是给桌面推理面板设计的（用户守在那儿等一次深度分析）。SDK plugin / REST / chat 这些入口的绝对天花板现在是 **2 小时**，因为你们的调用方通常自带超时、用户也没有"我在等一个 8 小时任务"的预期。需要满额的显式传 `depth_mode=True`：
+
+```python
+task_context = {"depth_mode": True}   # 恢复 8h 上限（显式意图优先）
+```
+
+`wallclock_budget_s` / `wallclock_hard_deadline_s` 若声明了更紧的边界，仍然按更小者生效 —— 这条分档只是给"什么都没声明"的 run 加了个兜底顶。
+
+**三个显式开关**（按精确度从高到低）：
+
+```python
+# ① 单次调用：告诉引擎"策略归属我判过了"（传 False 则相反：要求引擎自由路由）
+task_context = {"strategy_routing_decided": True}
+
+# ② 单次调用：直接指定，最精确
+task_context = {"strategy": "evidence_chain"}   # 或 "" + 上面的 decided=True 表示"不挂策略"
+
+# ③ 进程级 kill switch（调试用，不建议长期开）
+os.environ["KROW_CHAT_REASONING_AUTOROUTE"] = "0"   # 关闭自动路由
+os.environ["KROW_REASONING_LONGRUN"] = "0"          # 关闭长跑续期
+```
+
+**怎么确认真实生效**：路由结果会发 `reasoning.strategy.routed` 事件（含 `strategy` / `routed` / `intent` / `reason` / `entry`），订阅 EventBus（§6.3）即可看到引擎到底选了什么、为什么。日志里对应 `AgentV3: 自动策略路由 → …`；被上述任一道门拦下时会打印跳过原因。
+
+> 设计背景与三轮专家辩论：（内部）。
 
 ---
 

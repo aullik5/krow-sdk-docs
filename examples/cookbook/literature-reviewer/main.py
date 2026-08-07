@@ -380,20 +380,25 @@ def _build_request(
         "     * baseline 名（如 ``BPR-MF`` / ``SASRec``）",
         "     学术综述的核心价值就是让读者一眼看到证据数字，不要写空泛叙事",
         "",
-        f"{next_step + 1}. 调 literature_reviewer_detect_plagiarism_overlap",
-        "   - review_text=step 上一步生成的 markdown",
-        "   - source_texts={paper_id: abstract} 来自 step 1",
-        "   - 默认 5-gram + 60% 阈值；命中即 PlagiarismGate BLOCK",
-        "",
-        f"{next_step + 2}. 如 Gate BLOCK：根据 reason 修改 → 重写 markdown → 重检测",
-        "   - CitationCompletenessGate BLOCK → 看缺哪几段引用 → 补齐",
-        "   - PlagiarismGate BLOCK → 找命中段落 → 改写",
-        "",
-        f"{next_step + 3}. 调 smart_file_write(operation='write', path={md_path}, "
+        f"{next_step + 1}. 调 smart_file_write(operation='write', path={md_path}, "
         "content=<完整 markdown 文本>) 落盘",
         "   ⚠️ **铁律**：写 markdown 必须用 ``smart_file_write``；",
         "   ``word_smart_export`` 是 docx→其他格式 转换工具，会把 docx binary 写到 .md "
         "→ encoding 灾难",
+        "   ⚠️ **operation 只用 write**：write 覆盖同名文件，重写多少次都安全；",
+        "   用 create 写第二次会撞「文件已存在，请设置 overwrite=true」硬闸",
+        "   ⚠️ **content 必须是完整正文**：空正文会被 empty_content_gate 拒绝"
+        "（工具不落 0 字节文件）；正文过长被截断 → 先 write 首段再 append 续写",
+        "",
+        f"{next_step + 2}. 调 literature_reviewer_detect_plagiarism_overlap",
+        f"   - review_path={md_path}（上一步刚落盘的综述，工具自己读，省 token）",
+        "   - source_texts={paper_id: abstract} 来自 step 1",
+        "   - 默认 5-gram + 60% 阈值；命中即 PlagiarismGate BLOCK",
+        "",
+        f"{next_step + 3}. 如 Gate BLOCK：根据 reason 修改 → "
+        "用 smart_file_write(operation='write') 覆盖重写 → 重检测",
+        "   - CitationCompletenessGate BLOCK → 看缺哪几段引用 → 补齐",
+        "   - PlagiarismGate BLOCK → 找命中段落 → 改写",
     ])
     if docx_path:
         parts.append(
