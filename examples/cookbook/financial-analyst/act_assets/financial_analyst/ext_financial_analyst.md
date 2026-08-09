@@ -122,9 +122,12 @@ table[i]:
 ...
 ```
 
-**System 1 守门（DisclosureCompletenessGate）已包含 markdown 结构检查**——若简报
-用了独占行 bold 作章节标题，gate 会因 "缺 ## 段" 触发 BLOCK + 要求 LLM 重写。
-不要靠"hint 提醒"，**直接写对 markdown 即可**（详 AGENTS.md §0.1 "工具注册 ≠ 激活" 反模式）。
+⚠️ **照抄上面的骨架——没有 System 1 闸门在中途兜这条。** 旧文案称
+`DisclosureCompletenessGate` 会因"缺 ## 段"BLOCK，与实现不符（2026-08-09 更正）：
+它只做关键词子串匹配、不认 `##`，且只读 `word_smart_export` / `write_report`
+的结果，而本 ACT 的简报走 `smart_file_write` 落盘，不在其扫描面内。唯一因缺
+`##` 判红的是 journey E2E 预期卡的 `markdown_structure.min_h2_sections`，
+属**产物后置判据**——跑完才知道，写的时候没人拦你。
 
 ### 7. **PDF 渲染**（可选）
 
