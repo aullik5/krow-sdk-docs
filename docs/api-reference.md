@@ -567,6 +567,44 @@ agent.run(task, task_context={"act_name": "team_leader", "lock_act": True, "tool
 
 ---
 
+### §2.4.3 宿主自定义 task_context 注入（2026-08-11 新增）
+
+**解决的问题**：宿主往往有**只有自己知道**的 per-run 上下文——垂直插件零 LLM 判出来的能力名、租户 id、合规等级——它们要跟着每一次 run 走到闸门与提示词里。SDK 内建的注入（budget / hitl / 工具超时 / persona / ACT 锁 / 路由已决）只覆盖引擎自己的开关，此前没有给宿主留口。
+
+没有这个口时，宿主的唯一办法是**包装 Agent**（透明代理 + `__getattr__` 全委派 + 覆盖 `run`）。这条路有个静默失败模式：代理只覆盖它知道的那个入口。已有真实事故——某垂直宿主的代理只包了 `run`，生产走的是 `run_stream`，注入的能力名整整 7 小时没进过 `task_context`，所有按能力划作用域的闸门恒 DEFER，日志里一行报错都没有。
+
+#### `with_task_context_injector(injector: Callable[[dict | None], dict | None]) -> AgentBuilder`
+
+注册一个 per-run `task_context` 注入器。SDK 在 `Agent._compose_task_context` 统一施加，**`run` 与 `run_stream` 都过**——入口是 SDK 自己的事，不该由宿主去枚举。
+
+| 契约 | 语义 |
+|---|---|
+| 返回 `dict` | 作为本轮 `task_context` 继续往下走 |
+| 返回 `None` | 本轮不改（**不是**清空；清空会抹掉前面几层内建注入） |
+| 返回非 dict | 忽略 + 记 warning |
+| 抛异常 | 跳过该 injector + 记 warning（宿主的可选增强不该拖垮一次 run） |
+| 多次注册 | 按**注册序**执行，全部在内建注入之后（看得见 SDK 已写了什么，用 `setdefault` 还是覆盖由宿主决定） |
+| `injector` 不可调用 | 立即抛 `TypeError`（声明≠可用，当场炸而不是运行期静默跳过） |
+
+```python
+from krow_agent_sdk import AgentBuilder
+
+def inject_capability(tc: dict | None) -> dict | None:
+    merged = dict(tc or {})
+    merged.setdefault("capability", detect_capability(merged))   # 宿主自己的零 LLM 路由
+    return merged
+
+agent = (
+    AgentBuilder().from_env()
+    .with_task_context_injector(inject_capability)
+    .build()
+)
+```
+
+> 调用方在 `run(task_context=...)` 显式传的值要保住的话，injector 里用 `setdefault` 而不是直接赋值。
+
+---
+
 ### §2.5 Plugin 直接注入（6 stable + 3 experimental）
 
 | 方法 | 协议 | 稳定性 | 详见 |
