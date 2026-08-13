@@ -1676,10 +1676,14 @@ class ObservabilityPlugin(Protocol):
 | `observability_facade` 提供（SDK 注入） | 用途 | 内置 emit 现状 |
 |---|---|---|
 | `add_metric_sink(callback: Callable[[name, value, labels], None])` | metric 转发 | ✅ SDK 内置 emit（如 `agent.run.calls`） |
-| `add_trace_sink(callback: Callable[[span], None])` | tracing 转发 | ⚠️ **当前 SDK 内置不 emit trace span**——sink 可注册但不会被内置埋点喂数据（保留给你自己的 span / 未来埋点）。详 honesty note |
+| `add_trace_sink(callback: Callable[[span], None])` | tracing 转发 | ✅ SDK 内置 emit（`agent.run` / `agent.resume` / `agent.run_stream` 各一个 span）。详下方说明 |
 | `add_audit_sink(callback: Callable[[event], None])` | audit log 转发 | ✅ SDK 内置 emit（如 `agent.run.start/complete/error`） |
 
-> **诚实化说明（2026-06-01）**：内置埋点目前只触发 `emit_sdk_metric` / `emit_sdk_audit`（见 `modules/observability/sink_registry.py`），**未**调用 `emit_sdk_trace`。因此 `add_trace_sink` 注册的回调当前不会收到 SDK 自动产生的 span；若你需要 trace，请在自己的 plugin/工具代码里显式调用 `emit_sdk_trace(...)`。`metric` 与 `audit` sink 则会正常收到内置事件。
+> **内置 span 覆盖范围**：`Agent.run` / `Agent.resume` / `Agent.run_stream` 三个入口各自 emit 一个 span（span 名即方法名 `agent.run` / `agent.resume` / `agent.run_stream`），都带 `duration_ms` 与 `status`。注册 `add_trace_sink` 就能收到，不需要你自己埋点。
+> - `run` / `resume`：失败也发，`status="error"` 且带 `error_type` / `error_msg`。
+> - `run_stream`：span 在收尾处发一次，因此调用方提前 `break` 退出（正常用法）也有记录——排查"流为什么断了"最需要的恰是这一类；attrs 含 `items_yielded` / `terminated_normally` / `events_dropped`。
+> sink 回调抛异常不会影响 agent 主流程（fail-soft），但也不会重试，请自己保证回调轻量。
+> 更细粒度的 span（例如你的 plugin / 工具内部阶段）仍可在自己的代码里显式调用 `emit_sdk_trace(...)` 补充。
 
 #### 最小实现
 
@@ -2824,7 +2828,7 @@ register_step_actuator("my_pkg.actuators:TranslationGapActuator")
 | `Agent.list_findings(act_name=None)` | 读 | `(str\|None) -> list[dict]` | 慢环产出的 open findings（ACT 缺陷假设 / 冲突 / 体检 warn）。**绝不注入 prompt**，采纳走提案 + PR |
 | `Agent.get_base_promotion_proposal(act_name)` | 读 | `(str) -> str` | 该 ACT 最新的固化提案文本（无提案返空串）。**propose-to-human，绝不自动改 ACT base** |
 | `Agent.record_observations(patterns)` | 写 | `(Sequence[ObservedPattern]) -> int` | 把宿主侧算出的**跨任务**规律回流给蒸馏器 |
-| `Agent.distill_now()` | 写 | `() -> dict` | 立刻跑一轮睡眠期蒸馏，返回本轮统计 |
+| `Agent.distill_now(*, force=False)` | 写 | `(*, bool) -> dict` | 立刻跑一轮睡眠期蒸馏，返回本轮统计（含 `stopped_reason` / `forced`）。`force` **仅关键字** |
 
 **两个写入口刻意不让你手填教训**——那会绕过证据闸。`record_observations` 送的是**已归因的一句人话 + 支撑数字**（不是原始日志），`distill_now` 只把「什么时候睡一觉」的时机交给你；教训本身仍然只能由蒸馏器从证据里得出。
 
@@ -2844,7 +2848,24 @@ stats = agent.distill_now()
 
 `kind` 是最容易写坏的字段：它进 `cluster_key`，同一种模式**跨夜必须给同一个 `kind`**（别把时间戳、run id 拼进去），否则复发计数永远攒不到 `RECUR_THRESHOLD`（3），教训一条也晋级不了。`summary` 会原样进蒸馏 prompt，写「什么在哪儿反复出错」，不要写成指标罗列。另有可选字段 `severity`（`blocking` / `watch`，只影响蒸馏优先级，不做闸门）和 `scope`（`act_name` / `strategy`，跨 ACT 的系统级模式留空）。
 
-**`distill_now()` 对短生命周期进程是必需的**：自动蒸馏由 task-end 触发，但有两道节流——buffer 要够 `MIN_SIGNALS_TO_DISTILL`（4）条、距上次要够 `MIN_DISTILL_INTERVAL_SECONDS`（600）秒。跑完几个任务就退出的宿主进程里，这两道闸意味着蒸馏**几乎永远不发生**：信号靠 spool 一直攒着，却没人来烧。
+**`distill_now()` 对短生命周期进程是必需的**：自动蒸馏由 task-end 触发，但有两道节流——buffer 要够 `MIN_SIGNALS_TO_DISTILL`（4）条、距上次要够 `MIN_DISTILL_INTERVAL_SECONDS`（600）秒。跑完几个任务就退出的宿主进程里，这两道闸意味着蒸馏**几乎永远不发生**：信号靠 spool 一直攒着，却没人来烧。这两道节流对 `distill_now()` 本来就不生效（它直接调蒸馏器，不走 task-end 那条路），所以**没有、也不需要一个"绕过节流"的开关**。
+
+**产出为 0 时先读 `stopped_reason`。** `clusters_distilled=0` 有好几种成因，处置方向完全相反，光看这个 0 分不出来：
+
+| `stopped_reason` | 发生了什么 | 你该做什么 |
+|---|---|---|
+| `below_recurrence_threshold` | 有信号，但每一簇的复现次数都还不到质量阈值 `RECUR_MIN` | **最常见的一种。再跑几个任务把复现攒够——不是调参** |
+| `no_signals` | 一条可蒸馏的信号都没有 | 去查执行期信号有没有真的送进 spool（`record_observations` 有没有被调到、spool 目录写得进去吗） |
+| `disabled` | 睡眠期蒸馏被 `KROW_SLEEP_PHASE=0` 关掉了 | 开 flag |
+| `budget_llm_calls` / `budget_time` | 本轮 LLM 额度 / 时间预算用尽，剩余簇留到下一轮 | 多跑一轮即可；持续撞上再放宽预算 |
+| `preempted` | 被调用方中断，已完成的部分已落盘 | — |
+| `completed` | 本轮正常跑完（有产出，或够格的簇都处理完了） | — |
+
+不想自己维护这张表的话，`explain_stop_reason(code)` 能把原因码翻成"发生了什么 + 该做什么"的一句人话（含阈值的实际取值），未知码也返回可读兜底而不是抛——你的宿主比运行时旧的时候不会因此炸掉。它与 `ObservedPattern` 一样目前只在 runtime 内部路径下（`modules.agent.self_evolution.sleep_phase`），同样建议收在你自己的一层薄封装里。
+
+**`force=True` 不降低质量阈值。** 一个问题至少要复现到 `RECUR_MIN` 次才够格被蒸馏成教训，`force` 不碰这条线：把只出现过一两次的偶发噪声写进 overlay，正是慢环教训质量变差的来源，不是它的解法。`force` 唯一的作用是把这次调用标记进返回值的 `forced`，供事后对账。
+
+所以"传了 `force` 仍然 0 产出"是**正常结果而不是 bug**：`forced=True` 配 `stopped_reason="below_recurrence_threshold"` 这个组合，恰恰是在告诉你开关生效了、只是料还不够——没有这一格你会以为 `force` 没传进去，跑去查错的地方。
 
 **feature flag**（见 [§13](#13-环境变量与-feature-flag-速查)）：
 
