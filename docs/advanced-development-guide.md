@@ -1206,15 +1206,25 @@ SDK build() 时按 `plugin.phase` 自动路由到 plan 相位注册表，与 mac
 **典型用例**：
 
 ```python
-class PrometheusObservability(ObservabilityPlugin):
-    name = "prometheus_metrics"
+class PrometheusObservability:
+    plugin_id = "acme.prometheus"
 
-    def on_span_start(self, span: Span):
-        SPAN_START_COUNTER.labels(span.name).inc()
+    def register(self, facade) -> None:
+        # SDK build() 时注入 facade；在这里把自己的回调挂上去
+        facade.add_metric_sink(self._on_metric)
+        facade.add_trace_sink(self._on_span)
 
-    def on_span_end(self, span: Span):
-        SPAN_DURATION_HIST.labels(span.name).observe(span.duration_ms)
+    def _on_metric(self, name: str, value: float, labels: dict) -> None:
+        METRIC_GAUGE.labels(name, *labels.values()).set(value)
+
+    def _on_span(self, span: dict) -> None:
+        # span = {"name", "attrs": {..., "status"}, "ts", "duration_ms"}
+        SPAN_DURATION_HIST.labels(
+            span["name"], span.get("attrs", {}).get("status", "unknown"),
+        ).observe(span.get("duration_ms", 0))
 ```
+
+span 只在**结束时**发一次（没有 start / end 两个回调），所以直方图直接观测 `duration_ms` 即可。完整字段与内置 span 覆盖范围见 [`api-reference.md`](./api-reference.md) §5.6。
 
 ---
 
