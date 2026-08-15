@@ -887,6 +887,28 @@ def run(
 | `final_output` | `str` | 最终交付内容（如生成的 markdown / 报告全文） |
 | `metadata` | `dict` | 运行时 metadata（macro 步数、micro 调用数、LLM 调用次数、用时） |
 
+#### 结构化诊断字段（**不分成败都可能非空**）
+
+宿主要判"这趟活儿到底缺了什么"时，**读下面这几个字段，不要去解析 `success` 或
+任何一行日志/散文**。它们同时出现在 `background_task.completed` 事件的顶层
+payload 里（SSOT：`modules.agent.failure_taxonomy.ALWAYS_ON_DIAGNOSTIC_FIELDS`）。
+
+**只在有内容时才出现**：一步没缺就没有 `step_shortfall` 这个键。这是刻意的——
+恒铺一个空值，下游"这个键在不在"的判断就废了，而"一步没缺"与"这条链没接上"
+必须可区分。
+
+| 字段 | 形状 | 什么时候读它 |
+|---|---|---|
+| `step_shortfall` | `{"planned": int, "completed": int, "missing_count": int, "missing_steps": [{"step_id": int, "description": str}], "attribution": str}` | 想知道**缺了哪几步**而不只是"没做完"。`attribution` 区分系统截断与 LLM 主动弃步——前者重试大概率还被同一道闸截断，后者重试才有意义 |
+| `dropped_constraints` | `[{"tool": str, "material_keys": [...], "destination_keys": [...]}]` | 规划器填了、而工具 schema 表达不了因而被丢弃的入参。**`success=True` 时也可能非空**：丢掉 `date_from` 的那趟检索会正常跑完，只是跑的不是用户要的那件事 |
+| `format_degradations` | `[{"kind": str, "count": int, ...}]` | 模型回了"好的，我这就写入磁盘"这类对话式确认、工具从未派发的次数。典型症状恰恰是 `success=True`，所以频率本身才是健康度信号 |
+| `gate_fail_opens` | `[{"gate": str, "reason": str, "count": int}]` | 哪道闸门因为"判不了"而放行了。一道闸每天静默放行一百次和从来没被触发过，不看这个字段就长得一模一样 |
+
+> **不要解析 `outcome_verdict.reasons`。** 那里面的
+> `steps_ok=False(计划7步/真完成6步)` 是给**人**读的判据文案，措辞会随版本变；
+> 同一件事的机器可读形状在 `step_shortfall` 里。把散文当接口正是这几个字段
+> 存在的原因。
+
 ```python
 result = agent.run(
     "把 /data/x/meeting.txt 整理成 markdown 会议纪要",
