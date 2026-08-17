@@ -84,6 +84,29 @@ open output/wiki_preview/index.html      # macOS（Windows: start ...；Linux: x
 按 [`web-handoff/`](./web-handoff/README.md) 三件套接 BFF（`GET /api/wiki/page` 等）+
 Web shell + `@krow/wiki-render`（方案 A 渲染套件 + 方案 B 前端架构 + 方案 C BFF API 规范）。
 
+## 写自己的 ACT 前：先量一下 hint 送得到吗
+
+`__act__.yaml` 里写的 hint **不等于** macro planner 看到的 hint。`planner_hint` 超过
+2000 字符、`decision_hint` 超过 800 字符的部分，在解析 yaml 那一刻就被丢弃；而且没被
+pin 的 ACT 在默认聚合路径下很可能一个字都送不到。这两道收口历史上都是静默的 ——
+内置 `pptx_studio` 的作者写了 12524 字符的 `planner_hint`，planner 实际只看到 2000；
+14 个内置 ACT 里有 11 个在默认路径下送达 0 字符。
+
+本 demo 附了一个可直接跑的自检脚本：
+
+```bash
+python check_hint_delivery.py                  # 查本 demo 自带的 ACT
+python check_hint_delivery.py path/to/act_dir  # 查你自己的 ACT 目录
+```
+
+静态段只读 yaml，**不需要装 runtime**，写 yaml 时随手就能查；实跑段调
+`ACTHierarchyLoader.audit_hint_delivery()` 看真实通道与送达字数（插件 ACT 需在
+`with_act_plugin(...).build()` 之后才可见，把 `check_live()` 搬进你的 test 里即可）。
+
+本 demo 的 `knowledge_wiki_studio` 可当参考标定：`planner_hint` 1282 字符、
+`decision_hint` 569 字符，承载了三阶段工具链 + 两档词条模型 + 路径强约束仍在建议值内。
+完整送达模型（三道收口 + 三条 pin 途径 + 该写多长）见 `advanced-development-guide.md` §4.8。
+
 ## SDK plugin 清单（按需省略 Hint / Observability）
 
 | 类型 | 类 | 作用 |

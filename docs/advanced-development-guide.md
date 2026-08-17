@@ -767,13 +767,144 @@ ToolManager 自动注入每个工具的签名（参数 + docstring）。如果�
 
 #### 反模式 C：让 hint 长篇大论
 
-LLM context 是稀缺资源。一个 ACT 的 hint 加起来 > 2K token → 反模式。
+这条**不是**风格建议，是数据丢失。`planner_hint` 超过 2000 字符的部分在解析 yaml 那一刻
+就被丢弃，`decision_hint` 是 800 —— 写多少不影响 LLM 看到多少，只影响你丢多少。
+完整的送达模型与自检方法见 §4.8，写 hint 之前请先读。
 
 **修法**：
 
 - 把详细规则拆到 extended.md（按需加载）
 - 把多余规则下沉到工具入口归一化（System 1）
 - 把铁律下沉到 GatePlugin（System 1）
+
+### 4.8 ACT hint 的送达预算（写 hint 之前必读）
+
+你在 `__act__.yaml` 里写的 hint **不等于** macro planner 看到的 hint。中间有三道独立的
+收口，每一道都会丢内容。历史上前两道是完全静默的 —— 内置 `pptx_studio` 的作者写了
+12524 字符的 `planner_hint`，planner 实际只看到 2000，中间没有任何日志、遥测或报错
+（同一个 ACT 的 `decision_hint` 写了 8891 字符、只留 800）。2026-08 起三道
+都可查（见下文自检），但**预算本身仍在**，写之前先按预算写，比事后查更省事。
+
+#### 第一道：加载期单字段硬上限
+
+解析 yaml 时逐字段截断。超出部分**不进内存**，后面任何通道都救不回来：
+
+| 字段 | 上限 | 装什么 |
+|---|---:|---|
+| `planner_hint` | 2000 字符 | 工作流手册：何时用、串用顺序、典型组合 |
+| `decision_hint` | 800 字符 | 选型判据：什么时候该进这个 ACT |
+| `verify_fix_hint` | 2500 字符 | 校验 / 修复回合的引导 |
+| `verify_fix_hint_pisma` | 2500 字符 | 同上（PISMA 管线） |
+
+单位是**字符**不是 token。中文按字符算，一屏中文正文约 800–1200 字符。
+
+唯一例外是 pin 路径：ACT 被 pin 后走 yaml 原文全文披露，不受 2000 限制。但别把这
+当成"pin 了就随便写"—— 见第三道。
+
+#### 第二道：macro 聚合预算（没被 pin 时你多半一个字都送不到）
+
+没有任何 ACT 被 pin 时，所有 ACT 的 `planner_hint` 共享一个 `max_total_chars`
+（默认 4000 字符）的预算，按 ACT `priority` 从高到低装填；装不下的先降为一行指针，
+再装不下就整个丢掉。
+
+这是外部插件作者最容易踩的一条。内置 ACT 集实测（`audit_hint_delivery()` 默认参数）：
+14 个已加载 ACT 里，**11 个的 `planner_hint` 送达 0 字符**，另有 1 个只剩一行指针。
+你新增的 ACT 如果 `priority` 不高，默认就在这 11 个里。
+
+想让自己的 ACT 稳定拿到全文，只有三条路，任选其一：
+
+1. **自动 pin** —— 在 yaml 里声明 `disclosure_triggers`，命中即全文披露：
+
+   ```yaml
+   disclosure_triggers:
+     path_suffixes: ['.csv', '.xlsx']     # 用户输入里出现这些后缀
+     keywords: ['财报', '对标分析']         # 或出现这些词
+   ```
+
+   ⚠️ 只声明 `path_suffixes` 是个已知陷阱：用户说"帮我做个财务对标"时手上一个文件
+   路径都没有，触发器必然 miss。**纯意图类场景务必同时给 `keywords`。**
+
+2. **调用方显式 pin** —— `task_context={"act_name": "your_act"}`。
+3. **硬锁** —— `with_locked_act("your_act")`，见 §12。
+
+#### 第三道：全文披露区硬顶
+
+pin + baseline 的全文加起来超过 **24000 字符**时，超出的 ACT 被降为一行指针并告警。
+
+这道是 2026-08 补的。此前全文区不设限：pin 单个厚 ACT 能把披露区顶到 21979 字符，
+pin 全部能到 41436 字符（名义预算的 10.4 倍），而截断报告全程显示
+`truncated=False, dropped_chars=0` —— **因为那条路径根本不走截断分支**。报告最干净的
+时候，正是 prompt 最臃肿的时候。所以别用截断报告判断"我的内容送到了吗"，用下面的体检。
+
+#### 自检：我写的东西到 LLM 手上了吗
+
+```python
+from modules.agent.act.act_hierarchy import get_hierarchy_loader
+
+loader = get_hierarchy_loader()
+
+# 1) 加载期丢了多少（yaml 原文超单字段上限）· load_time_cap_report 是 property
+for rec in loader.load_time_cap_report:
+    print(f"{rec.act_name}.{rec.field}: 写了 {rec.original_chars} "
+          f"→ 上限 {rec.cap}，丢 {rec.lost_chars}")
+
+# 2) 装填期实际走哪条通道、送到几个字
+audit = loader.audit_hint_delivery()                    # 默认聚合路径
+print("一个字都没送到的 ACT：", audit.starved_act_names)
+print("只拿到一行指针的 ACT：", audit.pointer_only_act_names)
+
+rec = audit.per_act["your_act"]
+print(rec.channel, rec.authored_chars, "→", rec.delivered_chars)
+
+# 3) 被 pin 时又是什么样（对照组）
+pinned = loader.audit_hint_delivery(pinned_act_names=["your_act"])
+print(pinned.per_act["your_act"].channel)               # 期望 pinned_full
+```
+
+`channel` 取值：`pinned_full` / `baseline_full`（全文送达）、`aggregated`（进了聚合区）、
+`pointer_only`（只剩一行指针）、`dropped`（预算耗尽被丢）、`unreachable`。
+
+判据建议写成反退化 test，和 §4.10 的解析自检放一起：
+
+```python
+def test_my_act_hint_actually_reaches_the_planner():
+    loader = get_hierarchy_loader()
+    assert not [r for r in loader.load_time_cap_report if r.act_name == "your_act"], \
+        "hint 在加载期就被截了，改短或下沉到 extended.md"
+    audit = loader.audit_hint_delivery(pinned_act_names=["your_act"])
+    assert audit.per_act["your_act"].channel == "pinned_full"
+    assert audit.over_ceiling_by == 0, "全文披露区超硬顶，会被降级为指针"
+```
+
+#### 该写多长
+
+按"被 pin 时全文送达、没被 pin 时那一行指针也够用"来写：
+
+| 字段 | 建议 | 硬上限 |
+|---|---:|---:|
+| `planner_hint` | ≤ 1500 字符 | 2000 |
+| `decision_hint` | ≤ 600 字符 | 800 |
+
+参考标定：cookbook 里 `knowledge-wiki` 的 `knowledge_wiki_studio` 是目前最厚的示例 ACT，
+`planner_hint` 1282 字符、`decision_hint` 569 字符 —— 它承载了三阶段工具链 + 两档词条模型
++ 路径强约束，仍在建议值内。**你的 ACT 大概率不需要比它更长。**
+
+该 cookbook 里有一份可直接跑的自检脚本
+（`examples/cookbook/knowledge-wiki/check_hint_delivery.py`），静态段不需要装 runtime，
+写 yaml 时随手就能查；拷到自己项目里改个路径即可复用。
+
+超了怎么办 —— 按这个顺序，不要反过来：
+
+1. 能让 System 1 物理闸住的，删掉别写（§4.7 反模式 A）；
+2. 工具参数细节删掉，ToolManager 会自动注入签名（§4.7 反模式 B）；
+3. 剩下的厚内容下沉到 `extended.md` 的分节，LLM 需要时用
+   `lookup_tool_docs(section=...)` 按需拉，`planner_hint` 只留一行索引指过去。
+
+第 3 条有个反直觉的实测结论值得先知道：**把手册推给 LLM 买不到行为改变**。真实 LLM
+两臂对照（有手册目录 vs 无手册通道，各 2 轮）里，4/4 都在第一步走了错误捷径，879 字符
+的手册目录就在上下文里，模型看都没看。模型只在**真卡住之后**才会主动翻文档。所以
+"LLM 没做对 → 再多写一句 hint"这条反射默认应当被怀疑：先问能不能 System 1 闸住，
+再问有没有实测证明这段文字改变了行为。
 
 ### 4.9 SDK 自动工具文档生成（2026-05-27 PR-1）
 
@@ -2399,7 +2530,7 @@ leader = (
 
 ### 12.1 为什么需要硬锁
 
-默认 SDK 把「用哪个 ACT」当作**语义决策**交给 macro LLM：`task_context.act_name` 只是**软提示**——把该 ACT 的 `planner_hint` 置顶 + 完整披露，但**不禁止**切换、**不裁**工具宇宙（macro 工具快照默认是全局注册表，避免废掉文件 / 文档 / 搜索等跨域基础能力）。
+默认 SDK 把「用哪个 ACT」当作**语义决策**交给 macro LLM：`task_context.act_name` 只是**软提示**——把该 ACT 的 `planner_hint` 置顶 + 完整披露（不受 §4.8 第一、二道收口约束，但仍受第三道 24000 字符硬顶约束：pin 多个厚 ACT 时靠后的会被降为一行指针并告警），但**不禁止**切换、**不裁**工具宇宙（macro 工具快照默认是全局注册表，避免废掉文件 / 文档 / 搜索等跨域基础能力）。
 
 这在「对话槽固定角色 agent」场景会出事：一个 `team_leader` agent 只该做「拆解 + 派单」，它的派单工具是自定义 ACT 工具 `tl.create_task`。但语义选择器 / LLM 可能漂移到内置写作 ACT 的工作流，于是组长**既被纪律禁止自办、又在当前工作流里找不到派单工具** → 死路。根因不是工具被物理删除（它仍在全局注册表），而是 LLM 被错误的 ACT 引导带偏。
 
