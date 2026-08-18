@@ -71,7 +71,9 @@ def check_static(act_dir: Path) -> int:
         n = len(raw)
         budget = FIELD_BUDGETS.get(field)
         if n > cap:
-            verdict = f"超硬上限，加载期会丢 {n - cap} 字符"
+            # 实际保留量比 cap 略少：截断按行边界切并挂显式标记，回退找边界最多
+            # 让出 10%。所以这里报的是"至少丢多少"，不是精确值。
+            verdict = f"超硬上限，加载期至少丢 {n - cap} 字符（按行边界切，实际略多）"
             over.append(field)
         elif budget and n > budget:
             verdict = f"未超上限，但已超建议值 {budget}，建议下沉"
