@@ -128,8 +128,9 @@ def check_live(act_name: str) -> int:
     pinned = loader.audit_hint_delivery(pinned_act_names=[act_name])
     prec = pinned.per_act[act_name]
     print(f"[实跑] 被 pin 时：    channel={prec.channel} 送达 {prec.delivered_chars}")
-    if pinned.over_ceiling_by:
-        print(f"[实跑] ⚠ 全文披露区超硬顶 {pinned.over_ceiling_by} 字符，靠后的 ACT 会被降级")
+    if pinned.demand_over_ceiling_by:
+        print(f"[实跑] ⚠ 全文披露区需求超硬顶 {pinned.demand_over_ceiling_by} 字符，"
+              f"这一刀会削掉靠后的 ACT")
 
     # 判据：pin 之后必须全文送达。做不到说明 hint 太厚，该往 extended.md 下沉了。
     if prec.channel != "pinned_full":

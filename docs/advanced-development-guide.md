@@ -883,7 +883,7 @@ def test_my_act_hint_actually_reaches_the_planner():
         "hint 在加载期就被截了，改短或下沉到 extended.md"
     audit = loader.audit_hint_delivery(pinned_act_names=["your_act"])
     assert audit.per_act["your_act"].channel == "pinned_full"
-    assert audit.over_ceiling_by == 0, "全文披露区超硬顶，会被降级为指针"
+    assert audit.demand_over_ceiling_by == 0, "全文披露区需求超硬顶，会被降级为指针"
 ```
 
 #### 该写多长
