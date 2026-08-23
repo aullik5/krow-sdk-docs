@@ -859,6 +859,8 @@ for report in agent_builder.get_skill_reports():
 > **环境要求（skill 自述）**：Requires Python 3.14+ and uv
 ```
 
+<!-- ref: allow 上面示例里的 `scripts/extract.py` 是**用户自己 skill 目录**下的随包文件（实现处按 `bundled[0]` 插值，见 modules/agent/sdk/skill_adapter.py），不是本仓路径。标记写在代码块外，免得内部 lint 注记出现在对外文档的示例正文里。 -->
+
 Krow **不复制**这些文件，也**不执行**它们；它们留在你的 skill 目录里，由 LLM 按需经终端 / 文件工具读取。
 引用到但不存在的文件会进 `dangling_refs`。
 
