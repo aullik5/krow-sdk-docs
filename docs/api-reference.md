@@ -23,6 +23,7 @@
   - [§2.6 Visual Adapter 注入（3 路径）](#26-visual-adapter-注入3-路径)
   - [§2.6.1 Document Parser 注入（2 路径）](#261-document-parser-注入2-路径)
   - [§2.7 entry_points 自动发现（8 个 + 1 个 all）](#27-entry_points-自动发现8-个--1-个-all)
+  - [§2.7.1 外部 SKILL.md 装载](#271-外部-skillmd-装载v091)
   - [§2.8 测试注入](#28-测试注入)
   - [§2.9 LLM Record/Replay 接入](#29-llm-recordreplay-接入)
   - [§2.10 `build()` — 构造 Agent](#210-build--构造-agent)
@@ -762,6 +763,92 @@ my_research_tools = "my_pkg.plugins:MyResearchToolsPlugin"
 
 > 单条 plugin 加载失败 log warning，不阻塞其他 plugin 的加载。
 > MCPServer / Security 不在自动扫描范围（仍属 experimental，需手动注入）。
+
+---
+
+### §2.7.1 外部 SKILL.md 装载（v0.9.1+）
+
+把一个**用 markdown 写的** skill 目录接进来，无需写任何 Python。skill 会被翻译成一个扩展 ACT，走 [`with_act_plugin`](#25-plugin-直接注入6-stable--3-experimental) 的标准链路 —— 它**不是**另一套加载机制。
+
+> **默认 OFF 的形式是"你没写那行调用"**，与 [`with_act_plugin`](#25-plugin-直接注入6-stable--3-experimental) 一致 —— 没有 env 开关。曾有过 `KROW_ENABLE_SKILLS` / `KROW_SKILLS_PATH`，但环境变量只有在宿主主动调了读它的方法时才生效，用户照样要写代码；真要做到"设了就生效"就得无条件扫目录，而那正是本设计明确排除的隐式发现。
+
+#### `SKILL.md` 格式
+
+```markdown
+---
+name: word-format-skill
+description: 以一份已排版 .docx 为模板统一目标文档的版式
+when_to_use:                       # 可选
+  - 用户要求"按 X 的格式排版 Y"
+allowed-tools: [word_apply_style_spec]   # 可选：引用已存在的工具
+---
+
+（正文是完整的 markdown 指令手册，会被 verbatim 送给 LLM）
+```
+
+| frontmatter 字段 | 必须 | 去向 |
+|---|---|---|
+| `name` | ✅ | ACT 名（kebab-case 会被规范化为 snake_case，**并报出映射关系**） |
+| `description` | ✅ | planner 菜单里常驻的那一行 |
+| `when_to_use` | — | `planner_hint` / `decision_hint`；**省略时回落到 `description`** |
+| `allowed-tools`（或 `tools`） | — | 工具白名单；只能引用**已存在的**工具，skill 不注册新工具 |
+
+> 缺 `name` 或 `description` → 抛 [`SkillLoadError`](#12-errors--错误层与黄金模板)，并指明是哪个文件哪一项。
+
+#### `with_skill_directory(path: str | Path) -> AgentBuilder`
+
+| 字段 | 说明 |
+|---|---|
+| `path` | 含 `SKILL.md` 的目录，或含多个 skill 子目录的父目录 |
+| **不做** | 递归全盘扫描；只认 `<dir>/SKILL.md` 与 `<dir>/<any>/SKILL.md` |
+| **冲突** | skill 名重复 → `SkillLoadError`，不静默覆盖 |
+
+```python
+import os
+from krow_agent_sdk import AgentBuilder
+
+agent = (
+    AgentBuilder()
+    .with_krow_api_key(os.environ["KROW_API_KEY"])
+    .with_project_root("/data/case")
+    .with_skill_directory("./skills")
+    .build()
+)
+```
+
+#### `get_skill_reports() -> list[SkillLoadReport]`
+
+返回每个已装载 skill 的账本。装载过程中有三件事会在你背后发生，这个方法是把它们问出来的地方：
+
+| 字段 | 回答什么 |
+|---|---|
+| `renamed` / `original_name` / `act_name` | 我的 skill 被改名了吗（`word-format-skill` → `word_format_skill`） |
+| `unknown_tools` | `allowed-tools` 里哪些名字 Krow 没有（**不做猜测映射**，逐条报出） |
+| `resolved_tools` | 实际绑上的工具；为空 = 纯指令型 skill，仍可用 |
+| `injection_detections` / `injection_risk` | 正文触发了几处注入检测 |
+| `content_rewritten` | 正文是否**被改写过** |
+| `materialized_dir` | 翻译产物落在哪（可直接打开看"我的 skill 被翻译成了什么"） |
+
+```python
+for report in agent_builder.get_skill_reports():
+    print(report.describe())
+```
+
+`build()` 之后同一份账本可从 `agent.skills` 取，或走
+[`diagnostics.get_plugin_snapshot(agent)["by_protocol"]["skill"]`](#9-diagnostics--hints--visual--lifecycle) ——
+这样"我的 skill 被怎么处理了"在运行期可查，而不是只在启动日志里闪过一次。
+
+> **为什么要报注入过滤**：注入过滤对扩展 ACT 无条件生效，命中后内容会被改写但只进日志。
+> 对内建 ACT 这没问题，但 skill 是**你写的** —— 手册被改了一段而你不知道，是另一种失败。
+
+#### 边界
+
+| 不做 | 说明 |
+|---|---|
+| 不执行 skill 内的脚本 | 不 `exec` / 不 `subprocess` / 不导入其中的 python；脚本需由 LLM 走终端工具调用 |
+| 不做隐式目录发现 | 路径必须由宿主显式给出；放进某个约定目录**不会**自动生效 |
+| 不回写你的 skill 目录 | 翻译产物只写自己的缓存目录（你的目录可以是只读的） |
+| 不注册新工具 | skill 走白名单语义，只引用已存在的工具；因此工具名**不加** `<plugin>.` 前缀 |
 
 ---
 

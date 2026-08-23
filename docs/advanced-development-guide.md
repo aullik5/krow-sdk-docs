@@ -20,7 +20,7 @@
 | §1 | TURBO 哲学（两条总则：①语义/语法分工 System 1/System 2 + ②finished artifact 优先 + 近因效应锚定） | 设计任何决策前 |
 | §2 | Plugin 设计 5 大原则（SSOT / OCP / SRP / DRY / 复用） | 写 plugin 前 |
 | §3 | ToolPlugin 设计哲学（功能强大 + Agent 友好接口） | 写 ToolPlugin |
-| §4 | ACTPlugin / extended.md 编写最佳实践 | 写 ACTPlugin |
+| §4 | ACTPlugin / extended.md 编写最佳实践（§4.11 = 用 `SKILL.md` 写 ACT，不写 Python 的那条路） | 写 ACTPlugin |
 | §5 | HintPlugin / GatePlugin / EventListener 边界 | 写其它 plugin |
 | §6 | 关键基础设施速查（公开 SDK 暴露的接口；§6.8 = 策略自动路由的默认行为与开关） | 写代码时按需 |
 | §7 | 测试方法论（Plugin 单测 + record/replay + 真实 LLM 验证） | 验收前 |
@@ -1019,6 +1019,74 @@ def test_my_act_doc_coverage():
 ```
 
 跑 `pytest tests/test_my_act_loading.py -v`，覆盖率 < 80% 立刻发现问题。
+
+---
+
+### 4.11 用 `SKILL.md` 写 ACT：不写 Python 的那条路
+
+前面 4.1–4.10 讲的是**用 Python 写 ACTPlugin**。如果你要交付的只是「一份指令手册 + 几个已有工具的用法」，还有一条更短的路：写一个 `SKILL.md`，交给 [`with_skill_directory`](./api-reference.md#271-外部-skillmd-装载v091)。
+
+它会被翻译成一个扩展 ACT，走的是**同一条**装载链 —— 不是另一套机制。
+
+#### 什么时候用哪条
+
+| 你的产物 | 选 |
+|---|---|
+| 一份 markdown 指令手册，引用**已有**工具 | `SKILL.md` |
+| 需要注册**新工具**（Python 函数） | ToolPlugin + ACTPlugin（§3 / §4） |
+| 需要 `on_load` / `on_unload` 生命周期钩子 | ACTPlugin |
+| 需要在运行时按条件动态改 ACT 内容 | ACTPlugin |
+| 只想让不写代码的同事也能改 | `SKILL.md` |
+
+#### 翻译发生了什么
+
+```
+<skill_dir>/SKILL.md                    ← 你的文件，全程只读
+   │  解析 frontmatter → 规范化名字 → 物化
+   ▼
+<project_root>/.krow/skills/<name>/
+   ├── __act__.yaml     ← 由 frontmatter 翻译生成
+   └── ext_<name>.md    ← 你的正文，逐字
+   ▼
+（此后与手写扩展 ACT 完全同路）
+```
+
+`__act__.yaml` 是**可以打开看的** —— 想确认"我的 skill 被翻译成了什么"，直接读那个文件。
+
+#### 三件会在你背后发生的事
+
+skill 是你写的，但这条链上有三处会被自动处理。**都能问出来**（`build()` 前 `get_skill_reports()`，之后 `agent.skills`）：
+
+| 发生什么 | 为什么 | 怎么知道 |
+|---|---|---|
+| `word-format-skill` → `word_format_skill` | ACT 名只收小写字母、数字、下划线 | `report.renamed` / `act_name` |
+| `allowed-tools` 里的 `Bash` / `Read` 被忽略 | Krow 没有同名工具，**不做猜测映射** | `report.unknown_tools` |
+| 正文被注入过滤改写了一段 | 该过滤对扩展 ACT 无条件生效 | `report.injection_detections` |
+
+第三条尤其值得看一眼。对内建 ACT，过滤命中即 bug，进日志就够了；但你的手册被改了一段而你不知道，是另一种失败 —— 所以这一侧把它说出来。
+
+#### 写 `SKILL.md` 的两个要点
+
+**1. `description` 要写清"何时用"，不是"是什么"**
+
+它是 planner 菜单里唯一常驻的一行。省略 `when_to_use` 时，`planner_hint` 会回落到 `description` —— 如果这行只描述"是什么"，planner 就没有选用它的依据。
+
+```markdown
+❌ description: Word 排版工具
+✅ description: 用户要求"按 X 的格式排版 Y"时用；以一份已排版 .docx 为模板统一目标文档的版式
+```
+
+**2. 工具名写 Krow 的真名，不写别家的**
+
+skill 走**白名单**语义：只能引用**已存在的**工具，不注册新工具。因此工具名**不加** `<plugin>.` 前缀（加了会全部失配）。从别的生态搬 skill 过来时，`allowed-tools` 里的 `Bash` / `Read` / `Edit` 都不会命中 —— 逐条报出，你自己决定换成哪个 Krow 工具。
+
+全部未命中也能加载（纯指令型 skill 是合法形态），报告里会说清"它没有绑定任何工具"。
+
+#### 边界
+
+- **不执行** skill 内的脚本（不 `exec` / 不 `subprocess` / 不导入其中的 python）。带 `scripts/*.py` 的 skill 搬过来时，脚本需由 LLM 走终端工具调用。
+- **不做隐式目录发现** —— 路径必须显式给出。默认 OFF 的形式就是"你没写 `with_skill_directory` 那行"，没有 env 开关（与 `with_act_plugin` 同一口径）。
+- 只写自己的缓存目录，**绝不回写**你的 skill 目录（它可以是只读的）。
 
 ---
 

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "krow-cookbook-skill-loader"
+version = "0.1.0"
+description = "Krow SDK Cookbook · 用 markdown 扩展 agent（外部 SKILL.md 装载：frontmatter 翻译成扩展 ACT + 三件背后发生的事全部可审计）"
+authors = [{ name = "Krow team", email = "sdk@krow.cn" }]
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "krow-agent-sdk>=0.9.0.59",
+    # SDK 自己也依赖 PyYAML，但 cookbook CI 装 SDK 时带 --no-deps，
+    # 所以这里必须自己声明：翻译产物 __act__.yaml 的读写都要它。
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-timeout>=2.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "main.py",
+    "README.md",
+    "skills/**",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "main.py",
+    "README.md",
+    "skills/**",
+    "tests/**",
+    "pyproject.toml",
+    ".gitignore",
+]
