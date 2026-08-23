@@ -1053,15 +1053,17 @@ def test_my_act_doc_coverage():
 
 `__act__.yaml` 是**可以打开看的** —— 想确认"我的 skill 被翻译成了什么"，直接读那个文件。
 
-#### 三件会在你背后发生的事
+#### 会在你背后发生的事
 
-skill 是你写的，但这条链上有三处会被自动处理。**都能问出来**（`build()` 前 `get_skill_reports()`，之后 `agent.skills`）：
+skill 是你写的，但这条链上有几处会被自动处理。**都能问出来**（`build()` 前 `get_skill_reports()`，之后 `agent.skills`）：
 
 | 发生什么 | 为什么 | 怎么知道 |
 |---|---|---|
 | `word-format-skill` → `word_format_skill` | ACT 名只收小写字母、数字、下划线 | `report.renamed` / `act_name` |
 | `allowed-tools` 里的 `Bash` / `Read` 被忽略 | Krow 没有同名工具，**不做猜测映射** | `report.unknown_tools` |
 | 正文被注入过滤改写了一段 | 该过滤对扩展 ACT 无条件生效 | `report.injection_detections` |
+| 正文前面多了一段抬头 | 写明 skill 根目录，好让 `scripts/x.py` 这类相对路径可解析 | `report.skill_root` / `bundled_refs` |
+| frontmatter 有不合规范之处 | 只报不拦（官方 `template/` 那份自己就不合规） | `report.spec_violations` |
 
 第三条尤其值得看一眼。对内建 ACT，过滤命中即 bug，进日志就够了；但你的手册被改了一段而你不知道，是另一种失败 —— 所以这一侧把它说出来。
 
@@ -1076,7 +1078,7 @@ skill 是你写的，但这条链上有三处会被自动处理。**都能问出
 ✅ description: 用户要求"按 X 的格式排版 Y"时用；以一份已排版 .docx 为模板统一目标文档的版式
 ```
 
-**2. 工具名写 Krow 的真名，不写别家的**
+**2. `allowed-tools` 按规范用空格分隔，工具名写 Krow 的真名**
 
 skill 走**白名单**语义：只能引用**已存在的**工具，不注册新工具。因此工具名**不加** `<plugin>.` 前缀（加了会全部失配）。从别的生态搬 skill 过来时，`allowed-tools` 里的 `Bash` / `Read` / `Edit` 都不会命中 —— 逐条报出，你自己决定换成哪个 Krow 工具。
 
@@ -1084,7 +1086,8 @@ skill 走**白名单**语义：只能引用**已存在的**工具，不注册新
 
 #### 边界
 
-- **不执行** skill 内的脚本（不 `exec` / 不 `subprocess` / 不导入其中的 python）。带 `scripts/*.py` 的 skill 搬过来时，脚本需由 LLM 走终端工具调用。
+- **不执行** skill 内的脚本（不 `exec` / 不 `subprocess` / 不导入其中的 python）。带 `scripts/*.py` 的 skill 搬过来时，脚本需由 LLM 走终端工具调用 —— Krow 只负责在正文抬头里写明它们在哪。
+- **不复制** `scripts/` / `references/` / `assets/`。它们留在你的 skill 目录里按需读取；引用了但不存在的会进 `report.dangling_refs`。
 - **不做隐式目录发现** —— 路径必须显式给出。默认 OFF 的形式就是"你没写 `with_skill_directory` 那行"，没有 env 开关（与 `with_act_plugin` 同一口径）。
 - 只写自己的缓存目录，**绝不回写**你的 skill 目录（它可以是只读的）。
 

@@ -818,7 +818,7 @@ agent = (
 
 #### `get_skill_reports() -> list[SkillLoadReport]`
 
-返回每个已装载 skill 的账本。装载过程中有三件事会在你背后发生，这个方法是把它们问出来的地方：
+返回每个已装载 skill 的账本。装载过程中有若干件事会在你背后发生，这个方法是把它们问出来的地方：
 
 | 字段 | 回答什么 |
 |---|---|
@@ -827,6 +827,11 @@ agent = (
 | `resolved_tools` | 实际绑上的工具；为空 = 纯指令型 skill，仍可用 |
 | `injection_detections` / `injection_risk` | 正文触发了几处注入检测 |
 | `content_rewritten` | 正文是否**被改写过** |
+| `skill_root` | skill 根目录；正文里的相对路径都相对它解析 |
+| `bundled_refs` | 正文引用到、且**确实存在**的随包文件（`scripts/` / `references/` / `assets/`） |
+| `dangling_refs` | 正文引用了、但目录下**找不到**的文件 —— 手册在指一个不存在的东西 |
+| `compatibility` | skill 自述的环境要求（如 `Requires Python 3.14+ and uv`） |
+| `spec_violations` | 不符合 [Agent Skills 规范](https://agentskills.io/specification) 之处（**只报不拦**） |
 | `materialized_dir` | 翻译产物落在哪（可直接打开看"我的 skill 被翻译成了什么"） |
 
 ```python
@@ -839,7 +844,23 @@ for report in agent_builder.get_skill_reports():
 这样"我的 skill 被怎么处理了"在运行期可查，而不是只在启动日志里闪过一次。
 
 > **为什么要报注入过滤**：注入过滤对扩展 ACT 无条件生效，命中后内容会被改写但只进日志。
-> 对内建 ACT 这没问题，但 skill 是**你写的** —— 手册被改了一段而你不知道，是另一种失败。
+> 对内建 ACT 这没问题（它压根不走这条路），但 skill 是**你写的** —— 手册被改了一段而你不知道，是另一种失败。
+
+#### 随包文件（`scripts/` / `references/` / `assets/`）
+
+规范允许 skill 目录下带这三类资源，正文用**相对 skill 根目录**的路径引用它们。
+翻译产物落在缓存目录，与 skill 根目录不是同一个地方，因此 Krow 会在产物正文**前面补**一段抬头
+写明根目录（**不改**你正文里的任何一个字）：
+
+```markdown
+<!-- 由 SKILL.md 翻译生成；以下抬头为 Krow 补充，正文原样保留 -->
+> **Skill 根目录**：`/abs/path/to/my-skill`
+> 本手册中形如 `scripts/extract.py` 的相对路径**相对该目录**，读取或执行前请先拼成绝对路径。
+> **环境要求（skill 自述）**：Requires Python 3.14+ and uv
+```
+
+Krow **不复制**这些文件，也**不执行**它们；它们留在你的 skill 目录里，由 LLM 按需经终端 / 文件工具读取。
+引用到但不存在的文件会进 `dangling_refs`。
 
 #### 边界
 
