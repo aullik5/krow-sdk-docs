@@ -870,8 +870,14 @@ for report in agent_builder.get_skill_reports():
 <!-- 由 SKILL.md 翻译生成；以下抬头为 Krow 补充，正文原样保留 -->
 > **Skill 根目录**：`/abs/path/to/my-skill`
 > 本手册中形如 `references/REFERENCE.md` 的相对路径**相对该目录**，读取或执行前请先拼成绝对路径。
+> **本手册原文**：`/abs/path/to/my-skill/SKILL.md`（若上下文中的手册被截断，用 read_file 按行范围读这个文件取回全文）
 > **环境要求（skill 自述）**：Requires Python 3.14+ and uv
 ```
+
+倒数第二行是长手册的兜底通道：执行期每步的 prompt 有独立收口，超过 ~800 字的手册每步只拿到一行指针，
+取回时还会遇到单次 8000 字的上限。原文路径写在抬头里，配合上面那份已授权的访问权，
+LLM 可以直接读源文件补齐。手册怎么分档、`##` 小标题为什么重要，见
+[advanced-development-guide](./advanced-development-guide.md) §4.11「写 `SKILL.md` 的三个要点」第 3 点。
 
 <!-- ref: allow 上面示例里的 `scripts/extract.py` 是**用户自己 skill 目录**下的随包文件（实现处按 `bundled[0]` 插值，见 modules/agent/sdk/skill_adapter.py），不是本仓路径。标记写在代码块外，免得内部 lint 注记出现在对外文档的示例正文里。 -->
 
