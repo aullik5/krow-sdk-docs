@@ -644,6 +644,7 @@ agent = (
 ### §2.6 Visual Adapter 注入（3 路径）
 
 > 自 Step 2 P2（2026-05-13）起，Visual Adapter 是公开扩展点。三种注入路径汇合到 `Agent.visual_adapters` 属性。
+> **2026-08-24 起多一层收益**：注册过 adapter 的扩展名，同时会被决策脑的**产物完整性**判据看见 —— 它能读出"承诺交付的这份文件打不开 / 打开了但里面的单元是空的"，从而在收尾前止损。没注册 adapter 的扩展名对这条判据**合法休眠**（不报假警）。判据全表与能力边界详 [`advanced-development-guide.md` §10.10](./advanced-development-guide.md)。
 
 #### `with_visual_adapter(extension: str, adapter_class: Any) -> AgentBuilder`
 
@@ -2975,6 +2976,13 @@ register_step_actuator("my_pkg.actuators:TranslationGapActuator")
 **可观测**：执行器开火 emit `cognitive.actuated`（`run_stream` 默认订阅，见 [§6.3](#63-稳定-topic-速查)），payload 含 `decision` / `fires` / `dropped_steps`。结案 `result.metacog_decision_stats` 里 `actuations` 按**决策名**计数、`actuation_sources` 按**来源类**分档（换框架全族共用 `reframe` 一个决策名，所以"我这一族到底通电了没有"只能从后者读出来）。
 
 **headless / K8s**：注册必须在**每个 Pod 的进程启动期**跑到（注册表是进程内状态，不落盘、不跨进程共享）。用 entry points 自动发现最稳（见 §9.6 同款写法），显式 `register_*` 则要确保有人 import 到你的模块；启动后用 `get_actuation_snapshot()` 打一行日志自检，比"以为注册上了"便宜得多。
+
+**两堵下行墙**（**行为契约，不是 bug**；写执行器前必知）：
+
+1. **同指纹的重派会被静默判成已完成。** 引擎按 `tool` + 排序后的 `constraints` 给步骤算指纹（LLM 生成步另外算上 `purpose` 的开头一段）；与已成功步同指纹的新步直接算完成。⇒ **只改 `description` 的措辞不产生任何区别** —— 想让一步真的重来，必须换工具或换 `constraints`。
+2. **已执行的步撤不掉。** 动作面没有撤销键，只有覆盖重写（另见上面「三条铁律」第 3 条的三条不变量）。
+
+**能力边界（先读再决定注册什么）**：决策脑的能力分**可见 / 能止损 / 可修复**三档，内建通用面覆盖前两档；修复面对产物型任务是**已知缺口 · 在建**。三档定义、你各自要注册什么、以及现在就能用的替代方案，详 [`advanced-development-guide.md`](./advanced-development-guide.md) §10.10。
 
 完整实战（判据怎么选、饱和签名怎么写、反模式）见 [`advanced-development-guide.md`](./advanced-development-guide.md) §10.9「让决策脑替你动手」。
 
