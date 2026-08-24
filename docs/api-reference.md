@@ -802,6 +802,19 @@ allowed-tools: [word_apply_style_spec]   # 可选：引用已存在的工具
 | `path` | 含 `SKILL.md` 的目录，或含多个 skill 子目录的父目录 |
 | **不做** | 递归全盘扫描；只认 `<dir>/SKILL.md` 与 `<dir>/<any>/SKILL.md` |
 | **冲突** | skill 名重复 → `SkillLoadError`，不静默覆盖 |
+| **⚠️ 授权** | 每装载一份 skill，**同时授予 agent 对该 skill 根目录的完全访问权（读与写）** |
+
+> **这行调用会扩大 agent 的文件访问范围。**
+> 授予的是每份 skill **自己的根目录**，不是你传进来的那个 `path` —— 传父目录批量装载时，
+> 父目录下的非 skill 内容不会被连带授权。
+> 为什么必须授权：skill 目录通常在项目外，而 Krow 的三套路径判据（`PathSandbox`、
+> micro ReACT 的 `is_path_safe`、`ToolManager` 的 path 参数校验）默认都只认项目根。
+> 不授权的话，正文里 `scripts/extract.py` 这类引用**一个都读不到** —— 装进来的是一本 <!-- ref: allow 举例：skill 自带的脚本，不是本仓文件 -->
+> 手册指的东西全都够不着的手册。
+> **不提供只读模式**：三套判据里只有一套有读写之分，声称只读却只能在 1/3 上兑现
+> 是更坏的选择。需要只读时请自行把 skill 复制成只读副本再装载。
+> 授权结果可查：单份看 `SkillLoadReport.resource_root_granted`，
+> 全局看 `diagnostics.get_plugin_snapshot()["granted_resource_roots"]`。
 
 ```python
 import os
@@ -832,6 +845,7 @@ agent = (
 | `dangling_refs` | 正文引用了、但目录下**找不到**的文件 —— 手册在指一个不存在的东西 |
 | `compatibility` | skill 自述的环境要求（如 `Requires Python 3.14+ and uv`） |
 | `spec_violations` | 不符合 [Agent Skills 规范](https://agentskills.io/specification) 之处（**只报不拦**） |
+| `resource_root_granted` | skill 根是否已授权给路径沙箱；为 `False` 时正文里的 `scripts/` / `references/` 引用**够不着** |
 | `materialized_dir` | 翻译产物落在哪（可直接打开看"我的 skill 被翻译成了什么"） |
 
 ```python
@@ -855,7 +869,7 @@ for report in agent_builder.get_skill_reports():
 ```markdown
 <!-- 由 SKILL.md 翻译生成；以下抬头为 Krow 补充，正文原样保留 -->
 > **Skill 根目录**：`/abs/path/to/my-skill`
-> 本手册中形如 `scripts/extract.py` 的相对路径**相对该目录**，读取或执行前请先拼成绝对路径。
+> 本手册中形如 `references/REFERENCE.md` 的相对路径**相对该目录**，读取或执行前请先拼成绝对路径。
 > **环境要求（skill 自述）**：Requires Python 3.14+ and uv
 ```
 
@@ -863,6 +877,17 @@ for report in agent_builder.get_skill_reports():
 
 Krow **不复制**这些文件，也**不执行**它们；它们留在你的 skill 目录里，由 LLM 按需经终端 / 文件工具读取。
 引用到但不存在的文件会进 `dangling_refs`。
+
+能读到它们的前提是 `with_skill_directory` 授予的那份访问权（见上文）——
+`resource_root_granted` 为 `False` 时（例如 skill 根目录在装载后被移走），这些引用会全部失效。
+
+只装了 SDK、没装 `modules/` runtime（见 [runtime-install](runtime-install.md)）时，
+本进程里根本没有路径沙箱 —— 既没有东西可授权、也没有东西在拦，此时
+`resource_root_granted` 记 `False` 属正常，skill 照常装载。
+
+**读得到 ≠ 跑得起来。** 授权解决的是路径可达性；`scripts/` 里的脚本要真正执行，还需要
+终端工具在当前 scope 下可用，以及脚本自身的运行环境（skill 的 `compatibility` 字段自述的那些）。
+这两件事本 SDK 都不代为满足。
 
 #### 边界
 

@@ -1064,6 +1064,7 @@ skill 是你写的，但这条链上有几处会被自动处理。**都能问出
 | 正文被注入过滤改写了一段 | 该过滤对扩展 ACT 无条件生效 | `report.injection_detections` |
 | 正文前面多了一段抬头 | 写明 skill 根目录，好让 `scripts/x.py` 这类相对路径可解析 | `report.skill_root` / `bundled_refs` |
 | frontmatter 有不合规范之处 | 只报不拦（官方 `template/` 那份自己就不合规） | `report.spec_violations` |
+| **agent 拿到了这个目录的读写权** | 否则正文里的 `scripts/` / `references/` 引用一个都够不着 | `report.resource_root_granted` |
 
 第三条尤其值得看一眼。对内建 ACT，过滤命中即 bug，进日志就够了；但你的手册被改了一段而你不知道，是另一种失败 —— 所以这一侧把它说出来。
 
@@ -1089,7 +1090,8 @@ skill 走**白名单**语义：只能引用**已存在的**工具，不注册新
 - **不执行** skill 内的脚本（不 `exec` / 不 `subprocess` / 不导入其中的 python）。带 `scripts/*.py` 的 skill 搬过来时，脚本需由 LLM 走终端工具调用 —— Krow 只负责在正文抬头里写明它们在哪。
 - **不复制** `scripts/` / `references/` / `assets/`。它们留在你的 skill 目录里按需读取；引用了但不存在的会进 `report.dangling_refs`。
 - **不做隐式目录发现** —— 路径必须显式给出。默认 OFF 的形式就是"你没写 `with_skill_directory` 那行"，没有 env 开关（与 `with_act_plugin` 同一口径）。
-- 只写自己的缓存目录，**绝不回写**你的 skill 目录（它可以是只读的）。
+- **装载器自己**只写缓存目录，不回写你的 skill 目录。但注意下一条 —— 装载器不写，不等于 agent 不能写。
+- **⚠️ 装载一份 skill 会授予 agent 对该 skill 根目录的完全访问权（读与写）**。不授权的话，正文里的 `scripts/` / `references/` 引用一个都读不到（skill 目录通常在项目外，三套路径判据默认只认项目根）。授予的是每份 skill 自己的根，不是你传进来的扫描目录。需要只读时请自行装载一份只读副本；详见 [`with_skill_directory`](./api-reference.md#271-外部-skillmd-装载v091)。
 
 ---
 
