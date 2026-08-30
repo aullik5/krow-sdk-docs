@@ -2731,7 +2731,19 @@ Krow 的 macro 编排是元认知**决策脑**（GWT 全局工作站）：所有
 | `register_wake_trigger(target)` | `(callable\|str) -> str` | **唤醒层**：登记 WakeTrigger（`(prev,curr,delta,ledger)->str\|None`） |
 | `register_decision_classifier(target)` | `(callable\|str) -> str` | **结算层**：登记 DecisionClassifier（`(action,snap,ledger)->str\|None`） |
 | `register_control_reflex(name, *, on, actuator, max_fires=1, note="")` | `(...) -> str` | **控制层**：登记控制反射（`(executor)->bool`），在 LLM 被问**之前**确定性动手 |
-| `get_registry_snapshot()` | `() -> dict` | 只读：三注册表 + `control_reflexes` 已登记内容 + 计数（debug"我的 contributor 注册上了吗"） |
+| `get_registry_snapshot()` | `() -> dict` | 只读：三注册表 + `control_reflexes` 已登记内容 + `axes` + `magnitude_clamped` + 计数（debug"我的 contributor 注册上了吗 / 登记上了为什么没起作用"） |
+
+**快照字段**（`get_registry_snapshot()`，0.9.1.13 起含后两格）：
+
+| 键 | 含义 |
+|---|---|
+| `contributors` / `wake_triggers` / `decision_classifiers` | 三注册表已登记的 FQCN 列表 |
+| `control_reflexes` | 已登记的控制反射决策名（判据与派发同源，不是近似重算） |
+| `core_wake_triggers` | 核心内建触发器名（非 FQCN） |
+| `axes` | 核心轴 ∪ 已登记领域轴 —— 答"我的 `register_domain_axis` 生效了吗" |
+| `magnitude_clamped` | `{触发器名: 被夹取次数}`。触发器自报强度越界会被**静默**夹到强度上界（否则返回 `5.0` 就能永久霸占类内第一）；这一格非空 ⇒ **那个触发器的强度口径写错了**，症状是"我的触发器总是竞争不过别人" |
+
+> 快照是**注册**面，不是激活面：contributor 是否对某个具体任务生效取决于它的 `applicable(executor)`；反射有没有开过火看 `cognitive.reflex_fired` 事件或结案 `metacog_decision_stats`。
 
 **入参**：可传**类/函数对象**（facade 自动推导 FQCN 并**校验可 re-import**）或 **FQCN 字符串** `pkg.mod:Symbol`。返回实际登记的 FQCN。
 
@@ -3340,6 +3352,20 @@ finally:
 | `KROW_OVERLAY_INJECT` | `1` | 慢环：把 active overlay 教训按 disclosure_triggers 注入 prompt |
 | `KROW_OVERLAY_BEHAVIOR_CHANGE` | `1` | 慢环：允许 behavior-change 类教训晋级（软启动低权重） |
 | `KROW_OVERLAY_FULL_WEIGHT` | `1` | 慢环：允许 behavior-change 教训长期在线正向后升全权重（否则封顶 0.7） |
+
+#### 决策脑（决策环）kill switch（0.9.1.13+ · 默认全 **ON**）
+
+> ⚠️ 上一张表是**快环 = 认知负荷软提示**，本表是 **§9.6 的决策脑（决策环）**，两者不是一回事：前者在 strained/overload 时写一句软提示，后者是"稀疏唤醒 → LLM 显式拍板 → 信用回喂"那条闭环。关掉上表的 flag 不会关掉决策脑，反之亦然。
+> 除 `KROW_METACOG_DECISION_LOOP` 是三档以外，其余均为 `0`/`false`/`off`/`no` 关闭。
+
+| env var | 默认 | 用途 |
+|---|---|---|
+| `KROW_METACOG_DECISION_LOOP` | `full` | 决策环总开关三档：`off` 全关（探针/心跳都不注册）/ `observe` 只观测不唤醒 / `full` 观测 + 唤醒 + 拍板。**未知值保守落 `observe` 并打 warning**（不因手误值进入闭环，也不静默关观测） |
+| `KROW_DEEP_REFLECTION` | `1` | 深度反思（L2-2）：失败 escalation 时起一次独立 LLM 反思，结论以 `PRIORITY_HIGH` 下行 macro |
+| `KROW_METACOG_GOAL_ANCHOR` | `1` | 唤醒拍在决策块头部重锚用户终极目标（防长任务方向漂移） |
+| `KROW_METACOG_VALUE_ADJUDICATION` | `1` | 同拍多触发器竞争时按价值轴字典序裁决（准确性 > 完整性 > 速度 > 成本），见 §9.6 `value_axis` 约定 |
+| `KROW_METACOG_MICRO_BROADCAST` | `1` | 决策立场下行 micro：把拍板立场 + 理由 + ESCALATE 菜单注入 micro ReACT 的每次迭代 |
+| `KROW_METACOG_EXPECTATION` | `1` | 预期通道：拍板时登记"这一步应让哪条轴改善"，下一拍结算 confirmed / violated 并回喂信用 |
 
 #### 推理判别 / 长跑弹性 kill switch（0.9.0.48+ · 默认全 **ON**）
 

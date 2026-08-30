@@ -88,6 +88,16 @@ def wake_zero_download_with_hits(prev, curr, delta, ledger):
 
 三条声明的分工：`value_axis` 答"有多重要"，`error_axis` 答"谁的误差"，`handled_by` 答"谁来处置"。缺最后一条会被满秩校验拒——一条轴报了误差却没有决策认领它，就是"传感器齐全但执行器不读"的开环。
 
+声明齐了却还是赢不了裁决时，先查这两格（0.9.1.13+）：
+
+```python
+snap = get_registry_snapshot()
+snap["axes"]               # 我的 register_domain_axis 生效了吗
+snap["magnitude_clamped"]  # {触发器名: 被夹取次数}；非空 = 我自报的强度越界了
+```
+
+自报强度越界会被**静默**夹到上界（否则返 `5.0` 就能永久霸占类内第一），症状恰好就是"我明明声明齐了、却总是竞争不过别人"。用 `wake_magnitude_from_ratio` 而不是自己拍数字，就不会撞这一格。
+
 ### 零注册的另一条路：信号包络
 
 事件式、一次性的信号不必写 contributor 类：
