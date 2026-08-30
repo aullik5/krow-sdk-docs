@@ -2823,6 +2823,8 @@ publish_signal_envelope("litsci.download_gap", 0.7, kind="pdf_missing", source="
 
 返回投递是否成功（**fail-soft**：总线不可用返 `False`，绝不抛）。护栏：同轴同拍取峰值、每拍轴种数与总量硬顶、非法包络丢弃并计数（丢弃账进结案 `metacog_decision_stats.envelope.ingress`，nightly 可见——零注册不等于零问责）。
 
+⚠️ **返 `True` 只说明"发出去了"，不说明"有人在听"**：宿主可以用 `KROW_METACOG_SIGNAL_ENVELOPE=0` 关掉摄取侧，此时发布方一切照常、包络无人订阅。判断方法是看你的轴有没有出现在误差向量里（`cognitive.situation` 事件 / 结案 `metacog_decision_stats`），而不是看这个返回值。另外包络**只会被它自己那个 run 读到** —— 绑不到 run 的包络会留账但谁也读不到，所以别在跨任务的后台线程里发。
+
 **什么时候用哪条**（治理决议"感知自动、决策注册"）：事件式、一次性、突发的信号（工具连败、下载缺口、配额告警）走包络；**每拍都要被询问**的聚合型传感器与**控制律**（wake trigger / classifier）走注册表——控制律的修改必须深思熟虑。
 
 | 常量 | 类型 | 含义 |
@@ -3366,6 +3368,9 @@ finally:
 | `KROW_METACOG_VALUE_ADJUDICATION` | `1` | 同拍多触发器竞争时按价值轴字典序裁决（准确性 > 完整性 > 速度 > 成本），见 §9.6 `value_axis` 约定 |
 | `KROW_METACOG_MICRO_BROADCAST` | `1` | 决策立场下行 micro：把拍板立场 + 理由 + ESCALATE 菜单注入 micro ReACT 的每次迭代 |
 | `KROW_METACOG_EXPECTATION` | `1` | 预期通道：拍板时登记"这一步应让哪条轴改善"，下一拍结算 confirmed / violated 并回喂信用 |
+| `KROW_METACOG_SIGNAL_ENVELOPE` | `1` | 零注册感知通道（§9.6 `publish_signal_envelope`）的**摄取**侧。设 `0` 后发布方仍返 `True` 但无人订阅 —— 唯一能看出来的地方是误差向量里没有你的轴 |
+
+> 本表是**对外承诺稳定**的那几个。`KROW_METACOG_*` 下还有若干**内部迁移开关**（权威收编模式、让位规则一类），它们的默认值正随架构迁移移动、语义也会变，因此不在此登记 —— 请不要在部署脚本里依赖它们。要关决策脑就用 `KROW_METACOG_DECISION_LOOP`，它是唯一被承诺的总闸。
 
 #### 推理判别 / 长跑弹性 kill switch（0.9.0.48+ · 默认全 **ON**）
 

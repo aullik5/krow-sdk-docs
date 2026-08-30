@@ -78,7 +78,7 @@
 - ✅ `pip install krow-agent-sdk` + 写 plugin + record/replay 单元测试
 - 🚧 `agent.run()` 真实跑（等 M9 W4 上线，预计 2026-06）
 
-**公开文档仓**：[aullik5/krow-sdk-docs](https://github.com/aullik5/krow-sdk-docs)（2026-05-15 上线，**7 份**对外文档同步自 monorepo `docs/sdk/`：quickstart / external-developer-onboarding / runtime-install / advanced-development-guide / api-reference / roadmap / EULA）
+**公开文档仓**：[aullik5/krow-sdk-docs](https://github.com/aullik5/krow-sdk-docs)（2026-05-15 上线，**8 份**对外文档 + cookbook 全目录同步自 monorepo `docs/sdk/`：quickstart / external-developer-onboarding / runtime-install / headless-deployment / advanced-development-guide / api-reference / roadmap / EULA）
 
 外部团队 PyPI 接入：`pip install krow-agent-sdk` 独立子包，不依赖 krow monorepo。
 
@@ -94,6 +94,7 @@
 | ~~visual_inspect plugin 完整公开~~ | ~~外部团队视觉 QA 用（CAD 图 / 工业图纸 / 报告页布局合规性等）~~ | ✅ **PR #239 落地（2026-05-13）**：`from krow_agent_sdk.visual import VisualAdapter` namespace（11 symbol re-export）+ `from krow_agent_sdk.experimental.protocols import VisualAdapterPlugin`（experimental P10）+ `AgentBuilder.with_visual_adapter(ext, cls)` / `with_visual_adapter_plugin(plugin)` / `with_visual_adapter_plugins_from_entry_points()` 三条链式 API + entry_points GROUP `krow.visual_adapter`（ALL_GROUPS 9→10）+ BuilderConfig 接收 visual fields；DomainPackPlugin.get_visual_adapters() 旧路径不破坏（OCP）；15 单测 + 364 SDK 全套 unit pass |
 | ~~`Agent.run_stream()` 流式 API~~ | ~~让外部团队做交互式 UI / 实时进度条 / token 流式渲染~~ | ✅ **chore/sdk-run-stream-api-2026-05-15 完成**：`from krow_agent_sdk import StreamItem`（dataclass envelope，3 种 kind：`event` / `result` / `error`，frozen + fail-loud 字段配对校验）+ `Agent.run_stream(user_input, *, topics, idle_timeout=600.0, queue_max_size=1000, stop_event=None) -> Iterator[StreamItem]` 同步生成器；底层完全复用 `AgentV3.run` 主路径 + `EventBusReader.subscribe`，不引入新执行分支（OCP）；用户 break → finally 自动 unsubscribe + 自动 set owned stop_event 让 agent 协作 stop；**关键设计**：用 `terminated_event` 带外信号 + 短轮询主循环（不依赖 queue sentinel），避免 queue 满时 sentinel 被 drop 导致死锁；20 单测覆盖 happy path / 异常透传 / break 取消 / idle_timeout / queue 满 drop / 顺序复用 |
 
+| 决策脑（元认知）对外开放 | 让垂直场景团队把"离交付还差多少"接进元认知工作站，并在系统察觉卡点时**动手** | ✅ **2026-07~08 分批落地**：观测/唤醒/结算三注册表 + `register_domain_axis` + `publish_signal_envelope`（零注册感知）+ `get_registry_snapshot`（含 `axes` / `magnitude_clamped` 自查）+ 执行面 `register_control_reflex` / `register_step_actuator` / `register_reflex_decision`；结案读数 `metacog_decision_stats`、`cognitive.*` 事件族。可跑范例 `examples/cookbook/litsci-metacog/`（零 LLM）。**能力边界诚实登记**：可见 ≠ 能止损 ≠ 可修复，第三档（产物真的变好）内建通用面**做不到**，见 [advanced-development-guide §10.10](./advanced-development-guide.md)。文档 [api-reference §9.6 / §9.7](./api-reference.md#96-metacognition--配置决策脑三注册表) + 进阶指南 §10 |
 | 外部 `SKILL.md` 装载 | 让**不写 Python** 的用户也能扩展 agent | ✅ **2026-08-23 落地**：`AgentBuilder.with_skill_directory(path)` / `get_skill_reports()` / `agent.skills`。**无 env 开关** —— 默认 OFF 的形式是"你没写那行调用"（与 `with_act_plugin` 同 idiom）。**不新增 Protocol** —— `SKILL.md` 的 frontmatter 被翻译成 `__act__.yaml` 后合成 `ACTPlugin`，走既有装载链；产物物化到 `.krow/skills/<name>/` 可审计。改名 / 未命中工具 / 注入过滤命中三件事全部进 `SkillLoadReport`。边界：不执行 skill 内脚本、不做隐式目录发现、不回写用户目录。用法见 [api-reference §2.7.1](./api-reference.md#271-外部-skillmd-装载v091) + [advanced-development-guide §4.11](./advanced-development-guide.md) |
 
 ---

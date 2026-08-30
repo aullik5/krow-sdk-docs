@@ -696,7 +696,8 @@ agent = (
 1. **业务上**：把第 3 节的 ACT 模板改成你领域的（工业设计 / 法律 / 教研 ...）
 2. **架构上**：读 [`api-reference.md`](./api-reference.md) §5 的 10 类 plugin protocol（6 stable + 4 experimental）；[`advanced-development-guide.md`](./advanced-development-guide.md) §1 TURBO 哲学 / §4 ACT 最佳实践 / §6 测试方法论
 3. **测试上**：用 `LLMReplayStore` + `AgentBuilder.with_replay_store()` 写 record / replay 单测（详 §5.5 + [`api-reference.md`](./api-reference.md) §7）；含 `tests/` 的 monorepo 安装可用 `from krow_agent_sdk.test_sdk import HeadlessAgentHarness`
-4. **生产上**：set `KROW_SDK_TELEMETRY=1` 帮 krow 团队改进 SDK；set `KROW_SDK_HTTP_GATEWAY=1` 让外部 UI 接入
+4. **想让 agent 对你的领域"卡住了"有感觉**：读 [`advanced-development-guide.md`](./advanced-development-guide.md) §10（决策脑三注册表 + 控制反射 + §10.10 能力边界三档），跑 `examples/cookbook/litsci-metacog/`（零 LLM，可直接改成你的领域）。默认情况下决策脑对你的垂直任务是**全盲**的：它不知道你离交付还差多少，也就叫不醒任何人
+5. **生产上**：set `KROW_SDK_TELEMETRY=1` 帮 krow 团队改进 SDK；set `KROW_SDK_HTTP_GATEWAY=1` 让外部 UI 接入
 
 | Step | Wave | 状态 | 关键能力 |
 |---|---|---|---|

@@ -525,6 +525,15 @@ agent = (
 
 完整说明：[`api-reference.md` §2.4 `with_base_url`](./api-reference.md#22-工厂方法) + [`quickstart.md` §6.1](./quickstart.md#61-自定义-cloud-endpointstaging--私有部署--自动化测试)。
 
+### 路径 F：让决策脑对你的任务"看得见、叫得醒"（垂直场景团队几乎都需要）
+
+- **SituationContributor**：把"离交付还差多少"写进元认知工作站 —— 不接这一层，决策脑对你的任务族是**全盲**的，停滞 / 恶化一条都判不出来
+- **WakeTrigger / DecisionClassifier**：领域专属的"该惊动了"与信用结算
+- **控制反射 / StepActuator**：知道之后**动手**那一格（只接观测层 = 有传感器没执行器）
+- 先读能力边界三档（可见 ≠ 能止损 ≠ 可修复），免得把"缺口被看见了"验收成"产物被修好了"
+
+→ [`advanced-development-guide.md`](./advanced-development-guide.md) §10（含 §10.10 能力边界 / §10.11 决策请求块装了什么）+ [`api-reference.md`](./api-reference.md) §9.6 / §9.7 + 可跑范例 `examples/cookbook/litsci-metacog/`（零 LLM）
+
 ---
 
 ## 常见问题（Troubleshooting 索引）
