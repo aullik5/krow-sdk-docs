@@ -2178,6 +2178,8 @@ for item in agent.run_stream("..."):
 | 进度 | `progressive.step_completed` | `step_id` / `summary` / `success` |
 | 进度 | `progressive.replan_start` | `reason` / `attempt` |
 | 进度 | `progressive.early_conclude` | `step_index` / `gate_name` / `reason` |
+| 验收 | `progressive.verification_passed` | `confidence` / `low_confidence` / `threshold` / `summary` / `criteria_scope` / `reads_goal_axis`(bool) |
+| 验收 | `progressive.goal_anchor_blind` | `reason` / `anchor_sources` / `anchor_windowed` / `anchor_source_chars` / `anchor_chars` / `declared_question`(bool) / `may_be_missing_ask`(bool) / `promised_suffixes` |
 | HITL | `hitl.idempotent_skip` | `step_id` / `tool` / `reused`(bool) / `idempotent_reuse`(bool) |
 | Planner | `planner.phase2_start` | `act_name` |
 | Planner | `planner.phase2_end` | `act_name` / `tools_selected` |
@@ -2205,6 +2207,51 @@ for item in agent.run_stream("..."):
 
 > **铁律**：表中 topic 在 SemVer 内稳定。**其他 topic** 仍可订阅（EventBus 是开放的），但**不在 SemVer 稳定保证内** — 主仓 refactor 可能 break。
 > `cognitive.*` 的全量清单（含执行器面、上行监测面、内感受面）SSOT 在 `modules/agent/progressive/cognitive_topics.py:COGNITIVE_TOPICS`；上表只列**稳定保证内**的那些。SDK `AgentBuilder` 默认订阅其中一个子集，见 §9.6。
+
+#### `progressive.goal_anchor_blind`：本轮"用户要什么"这一轴没读到东西
+
+引擎每个任务会做一次语义抽取，把用户要求变成可机器判定的交付单元（"至少 20 页"
+"必须落一个 `.pptx`"）。抽不出单元时，goal 覆盖度轴会**静默退回**步骤进度
+——"每一步都跑成功了"于是等价于"用户要的东西交付了"。这两件事显然不等价，而在
+宿主视角上它们同形：都是一次成功的 run。这个事件就是把它们分开。
+
+**发的时机（三种成因，`reason` 字段区分）**：
+
+| `reason` | 含义 | 宿主侧通常怎么处置 |
+|---|---|---|
+| `no_anchor` | 四级来源全空，一个字的需求线索都没有 | 派单文本 / `task_context` 有问题，挂起人审 |
+| `llm_unavailable` | 抽取调用本身失败 | 瞬时故障，重试或降级放行 |
+| `barren_extraction` | 锚里有料，但抽出 0 条 | 看 `may_be_missing_ask` 再决定 |
+
+**`may_be_missing_ask` 是给闸门用的那个布尔**：`false` 表示用户确实没提可量化要求
+（开放式咨询，0 条是正确读数）；`true` 表示线索被限窗切过且没有显式声明的原问题，
+即用户那句要求有可能根本没进抽取的输入。
+
+**`anchor_sources` / `anchor_windowed` / `anchor_source_chars` 用的是四级来源代号**：
+
+| 代号 | 来源 | 限窗 |
+|---|---|---|
+| `P1` | `task_context["question"]`（调用方**显式声明**的用户原问题） | 头 1200 字 |
+| `P2` | 本轮 run 的入口原文 | **两端** 1200 字（头尾各半，中段省略） |
+| `P3` / `P4` | 首版 / 当前 `plan.goal`（LLM 转述） | 头 400 字 |
+
+> **拼装了前缀的宿主请显式声明 P1。** P2 拿到的是本轮 run 的**入口原文**，不是用户
+> 原话 —— 宿主若在用户那句话前后拼装了身份前言 / 团队简报 / 跨会话记忆 / 花名册，
+> 用户的要求就落在这段文本的某个位置，而那个位置我们这侧不可知也不可约束。P2 取
+> 两端窗正是因为不该赌拼装顺序，但它只能兜住"要求还在某一端"；要求落在超长入口
+> 文本正中间时两端窗同样看不见。P1 在场且完整时，`may_be_missing_ask` 恒为 `false`。
+
+#### `progressive.verification_passed`：`confidence` 的判据范围
+
+`confidence` 是**独立审查 LLM 自报**的数字，闸门只认它同一份 JSON 里的
+`goal_achieved`（`false` 一律阻断结案，与 `confidence` 无关；`confidence` 低于
+`threshold` 只升日志告警，不阻断）。
+
+`reads_goal_axis: false` 是显式声明，别按直觉理解这个数字：它**没有**读 goal 覆盖度轴。
+"用户要求兑现了几条"那条链是 `cognitive.load` 的 `goal_targets_satisfied` /
+`goal_gap_ratio`，与本事件无交集。所以一个高 `confidence` **不构成**"系统看过用户
+要求且认为达成了"——要那个结论，请读 goal 轴，或读 `progressive.goal_anchor_blind`
+确认那一轴这轮到底有没有睁眼。
 
 #### `cognitive.*` 的保底 `reason` 契约（0.9.1.2 起）
 
