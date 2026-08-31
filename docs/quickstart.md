@@ -523,9 +523,9 @@ result = visual_inspect(pptx_path, expectation="...")
 # 几何 issue 会出现在 issues 中，severity=warning（路线图 Batch 1+2 默认）
 # 1 周观察期满后升 severity=error（Q107 marker 方向 / 严重几何漂移）
 
-# 想强制阻断 conclude？打开 verify_completion gate (PR-5)：
-# os.environ["PISMA_PPTX_GEOMETRY_VERIFY_GATE"] = "true"
-# os.environ["PISMA_PPTX_GEOMETRY_VERIFY_GATE_ANY_SEVERITY"] = "true"  # opt-in
+# 注：PR-5 曾提供 verify_completion 侧的几何兜底闸门 + 两个 env 开关，
+# 已于 2026-08 撤除：那道闸按 Q095/Q105-Q107 过滤，而 checker 早已不发这批码，
+# 闸门恒不响。想阻断 conclude 请自己在 verify 阶段读 issues 判定。
 ```
 
 ### 4.5.5 故障排除
