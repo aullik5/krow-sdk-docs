@@ -975,7 +975,7 @@ def build(
 | `KrowAPIKeyInvalidError` | `validate_connection=True` 时 cloud 返回 401 |
 | `PluginSignatureMismatchError` | `validate_connection=True` 时 plugin signature 与 Protocol 不匹配 |
 | `InvalidPluginIDError` | `plugin_id` 不符合 `<org>.<plugin_name>` 双段命名 |
-| `DuplicatePluginIDError` | 同进程内 plugin_id 撞名 |
+| `DuplicatePluginIDError` | **同一 protocol 内** plugin_id 撞名（跨 protocol 复用是允许的，详 [§5.0](#50-plugin_id-命名约束与落地前预检)） |
 | `PluginLoadError` | plugin `on_load` 抛异常 |
 
 > Plugin 错误模式由 env `KROW_SDK_PLUGIN_ERROR_MODE` 控制：
@@ -1002,6 +1002,8 @@ def run(
     stop_event: Any | None = None,           # threading.Event
     inbound_messages: list[dict[str, str]] | None = None,
     task_context: dict[str, Any] | None = None,
+    execution_profile: str | None = None,
+    output_contract: dict[str, Any] | None = None,
 ) -> AgentV3Result: ...
 ```
 
@@ -1014,6 +1016,8 @@ def run(
 | `stop_event` | `threading.Event` 实例；外部 `set()` 后 agent 协作停止（不立即；详 `agent_v3.py` stop_event 协议） |
 | `inbound_messages` | 上文消息序列 `[{"role": "user", "content": ...}]`（兼容 OpenAI chat 格式） |
 | `task_context` | 任务级配置：`act_name`（软提示，提权某 ACT）、`lock_act` + `tool_universe`（硬锁 ACT + 裁工具宇宙，见 §2.4.2）、`agent_identity` / `persona_directives`（见 §2.4.1）、`micro_budget`、`max_coverage_rounds` 等 |
+| `execution_profile` | 宿主对任务**形状**的声明（见 [§3.6 执行剖面](#36-执行剖面-execution-profile)）。`run_stream()` 同名参数语义一致 |
+| `output_contract` | 宿主对最终输出**形状**的声明，如 `{"required_trailing_block": "json", "min_chars": 200}`。`run_stream()` 同名参数语义一致 |
 
 > **`task_context['max_coverage_rounds']`**（int，0-10，默认 2）：长文报告"覆盖度驱动续写"的最大轮数。
 > 当结构化多章节报告（≥3000 字 + ≥3 标题）字符达标但 LLM 自检判定仍有用户子问题未覆盖时，系统会定向补全缺失章节，最多续写本轮数。
@@ -1374,6 +1378,118 @@ HITL 挂起→resume 跨越的状态由 `ProgressiveExecutor.export_hitl_snapsho
 （payload 含 `reused: true`）；同时该 step 的 `progressive.step_start` 带 `idempotent_replay: true`，
 供接入方前端把「续跑重放」与「真执行」区分，避免渲染误导用户的「进行中」步骤条。
 
+### §3.6 执行剖面（execution profile）
+
+宿主把"这个任务是什么形状"告诉组员。典型场景是多 agent 协同：分解已经在派工层做完了，组员照做一件事即可——不该再跑一遍完整宏观 ReACT（规划 / 自检 / 重规划），否则元工作烧掉的预算比正事还多。
+
+```python
+from krow_agent_sdk.execution_profiles import (
+    ExecutionProfile, register_execution_profile,
+)
+
+VERDICT_TWO_STEP = register_execution_profile(
+    ExecutionProfile(
+        name="verdict_two_step",
+        max_plan_steps=2,      # 读产物取证据 1 步 + 落裁决/交回执 1 步
+        allow_replan=False,    # 形状已定，不许重开计划
+        note="验收员：读产物取证据，再落裁决",
+    )
+)
+
+result = agent.run(task, execution_profile=VERDICT_TWO_STEP)
+```
+
+| 字段 | 类型 | 语义 |
+|---|---|---|
+| `name` | `str` | 剖面名，进 `run(execution_profile=...)` |
+| `max_plan_steps` | `int` | 计划步数上限（`0` = 不设限）。作为**第三个口径**进既有计划长度闸取严，不新起闸门 |
+| `allow_replan` | `bool` | 是否允许重规划。`False` 时 **macro LLM 主动请求**与**失败驱动**两条入口都会被拒，并引导去 `run_step` / 增量 revision / `conclude` |
+| `note` | `str` | 给人看的说明，会出现在日志与拒绝信息里 |
+
+| API | 说明 |
+|---|---|
+| `register_execution_profile(profile)` | 注册并返回剖面名；重复注册同名同值幂等 |
+| `registered_profiles()` | `dict[str, ExecutionProfile]`，含内置 + 领域注册 |
+| `resolve_execution_profile(name)` | 按名取剖面；不认识的名字返回 `None` + 记 warning |
+| `replan_allowed(task_context)` | 本轮剖面是否允许重规划 |
+
+**内置剖面**：`standard`（默认，不设限）、`leaf_direct`（`max_plan_steps=1` + `allow_replan=False`）。
+
+不认识的剖面名按默认剖面跑完并记 warning，**不**整单失败——旧引擎遇到新剖面名时正确行为是把这一单跑完，而不是锁死。
+
+#### ⚠ 钉剖面之前先数一遍"物理最小步数"
+
+`leaf_direct` 的 `max_plan_steps=1` 隐含一个假设：**叶子任务 = 一步**。契约系统里这个假设常常不成立——"做一件事"通常是**两步**：一步取证据、一步落裁决 / 交回执，而第二步的入参取决于第一步的结果，所以两步不可合并：
+
+- 压不进 `tool_chain`：`deterministic_bundle` 要求 bundle 内每个工具都是 deterministic（不需要 LLM），而裁决内容必须由 LLM 读到正文之后才产生；
+- 拆成 `is_revision=True` 的 1 步增量也不行：累计判据是 `completed_ok + len(steps)`，读完第一步后 `1 + 1 > 1` 照样越限。
+
+于是 `max_plan_steps=1` 对这类任务是**恒定越限**——没有任何提交形状能通过，换任何模型都会撞。
+
+**判据：钉 `leaf_direct` 之前先数一遍这个任务的物理最小步数。> 1 就注册一个自己的剖面**（如上面的 `verdict_two_step`），不要钉 `leaf_direct` 再靠格式重试兜。
+
+#### 姊妹参数：`output_contract`（输出形状声明）
+
+`execution_profile` 约束的是**执行过程**的形状（几步、能不能重规划）；`output_contract` 约束的是**最终产物**的形状：
+
+```python
+result = agent.run(
+    task,
+    execution_profile=VERDICT_TWO_STEP,
+    output_contract={"required_trailing_block": "json", "min_chars": 200},
+)
+```
+
+| 键 | 类型 | 语义 | 违约原因码 |
+|---|---|---|---|
+| `required_trailing_block` | `str` | 要求正文以该语言的围栏块**收尾**（如 `"json"`），供宿主机械解析。大小写不敏感；`"*"` = 任意语言都算数 | `missing_trailing_block` / `wrong_trailing_block_lang` |
+| `min_chars` | `int` | 最终输出的最小字符数（防"只剩一句道歉"式的空交付） | `output_too_short` |
+| `required_sections` | `tuple[str, ...]` | 长文必须包含的章节标题。缺哪几节会**点名**报，宿主据此定点补写而不是整篇重来 | `missing_sections` |
+
+违约时 `result.degraded_reason` 会带上 `output_contract: <原因码>`，并发 `agent.output_contract_violated` 事件。
+
+**契约是可选声明，字段拼错按"没声明该项"处理、不 fail-loud**——校验器只在声明存在时才有话语权，为一个拼错的键打断一次真实交付不划算。同理，`execution_profile` 与 `output_contract` 互相独立，可单独用也可同时用；缺省（`None`）= 宿主没声明，按引擎默认收敛，SDK 这一层**不会**替你编一个默认形状。
+
+### §3.7 `contract_actions` — 让 ACT 声明可直接调用的宏动作
+
+**问题形状**：macro 层的动作集是固定的（`plan_task` / `run_step` / `replan_task` / `verify_completion` / `conclude` …）。契约类工具——比如把裁决交回派工方的 `worker.submit_verdict`——在语义上是一个**宏动作**（它结束这一轮，不是"计划里的一步"），但 macro LLM 直接调它会撞 `unknown_tool`，而包成一个 `run_step` 又要先有计划、于是和计划长度闸打架。
+
+**解法**：ACT 在 `__act__.yaml` 里**声明**哪些工具可以作为宏动作直接调用：
+
+```yaml
+# <your_act>/__act__.yaml
+contract_actions:
+  - worker.submit_verdict
+  - worker.report_blocked
+```
+
+声明后，这些工具名进入 macro 动作白名单，macro LLM 可以直接调用，**不需要**先 `plan_task`、也不占计划步数。这是 ACT 侧的声明式扩展点（OCP：加动作只改 yaml，不动引擎）。单个字符串也接受（`contract_actions: worker.submit_verdict`）。
+
+| 何时用 `contract_actions` | 何时用普通工具 |
+|---|---|
+| 这次调用**结束本轮**（交回执 / 提交裁决 / 报阻塞） | 这次调用是达成目标路上的**一步** |
+| 由派工契约规定必须调，不需要规划 | 需要与其他步骤编排、有前后依赖 |
+
+**生效条件是三重交集，缺一不可**——声明只是三者之一：
+
+```
+真正进 macro 动作空间 = ACT 声明 ∩ ToolManager 已注册 ∩ 本轮 tool_universe
+```
+
+| 落选原因码 | 什么时候发生 | 怎么修 |
+|---|---|---|
+| `not_registered` | yaml 里的工具名拼错，或宿主没把该工具注册进 `ToolManager` | 核对工具名；确认 `ToolPlugin` 真注册了它 |
+| `outside_tool_universe` | 派工方声明了 `tool_universe`（如 `"act_only"`）而该工具不在其中 | 把工具加进本轮工具宇宙——契约动作**不是**绕过硬锁的后门 |
+| `shadows_macro_action` | 声明的名字与 `plan_task` 等编排入口撞名 | 换名字；ACT 声明不允许改写 macro 控制流 |
+
+被交集刷掉的声明会打 **WARNING** 日志（含原因码），不静默丢弃。上线前建议扫一遍这条日志——声明了却没生效，现场表现就是 LLM 调用时撞 `unknown_tool`。
+
+契约动作的工具超时是 **600s**（跨宿主边界调用，不用本地工具的 30s 默认值）。
+
+主仓 SSOT：`modules/agent/progressive/contract_actions.py`；yaml 字段归一在 `modules/agent/act/act_hierarchy.py:_coerce_contract_actions`。
+
+> 与 §3.6 的关系：如果你的任务是"取证据 + 交回执"两步，**两个机制选一个**——要么注册 `max_plan_steps=2` 的剖面走正常计划，要么把交回执那一步声明成 `contract_actions` 让它不占步数。不要既钉 `leaf_direct` 又指望把两步塞进一步。
+
 ---
 
 ## §4. 配置 dataclass
@@ -1483,10 +1599,70 @@ class HttpGatewaySpec:
 10 个 Protocol 是 SDK 的核心扩展点，外部开发者通过实现这些 Protocol 给 Krow agent 加能力。
 
 > **共通规则**：
-> - 所有 Plugin 都必须有 `plugin_id` 属性，格式 `<org>.<plugin_name>`，全小写 `[a-z0-9_-]`，分别 3-20 / 3-30 字符（详 [§12 InvalidPluginIDError](#12-errors--错误层与黄金模板)）
+> - 所有 Plugin 都必须有 `plugin_id` 属性，格式 `<org>.<plugin_name>`（详 [§5.0 plugin_id 命名与预检](#50-plugin_id-命名约束与落地前预检)）
 > - SDK build() 期 `_protocol_validator` 会做 signature 校验（runtime_checkable 不查签名细节）
 > - lifecycle hook（[§9.4](#94-lifecycle--生命周期-hook)）`on_load(ctx) / on_unload(ctx)` 可选实现
 > - **System 1 vs System 2 边界**：每个 Protocol 文档明确标注（System 1 = 确定性 / System 2 = LLM 语义）
+
+### §5.0 `plugin_id` 命名约束与落地前预检
+
+#### 格式
+
+`plugin_id = "<org>.<plugin_name>"`，两段用 `.` 分隔：
+
+| 段 | 允许字符 | 长度 | 注意 |
+|---|---|---|---|
+| `<org>` | 全小写 `[a-z0-9_-]` | 3-20 | **允许**连字符（`my-org.foo` 合法） |
+| `<plugin_name>` | 全小写 snake_case `[a-z0-9_]` | 3-30 | **不允许**连字符（`acme.my-tool` 不合法） |
+
+只允许**两段**：`krow_cookbook.demo.plugin` 这种三段会被拒。
+
+#### 唯一性是 per-protocol，不是全进程
+
+`plugin_id` 需在**同一 protocol 内**唯一。**跨 protocol 复用同一个 `plugin_id` 是允许且推荐的**——一个 plugin pack 同时实现 `ACTPlugin` + `ToolPlugin` + `GatePlugin` 并共享一个 `plugin_id` 属正常用法：
+
+```python
+class MyPack:                      # 同时满足 ACTPlugin / ToolPlugin / GatePlugin
+    plugin_id = "acme.my_pack"     # 三个 protocol 共享同一个 ID —— 不会撞名
+
+builder = (AgentBuilder()
+    .with_act_plugin(MyPack())
+    .with_tool_plugin(MyPack())
+    .with_gate_plugin(MyPack()))   # OK
+```
+
+只有同一 protocol 下两个 instance 用同一个 `plugin_id` 才算撞名（如 `with_tool_plugin(A())` 两次）。
+
+#### 落地前预检（不需要 api_key、不联网）
+
+约束在 `AgentBuilder.build()` 期 fail-loud，但 `build()` 需要 api_key 且会联网。要在 authoring / CI 期就验证命名，用**纯函数**预检——它与 `build()` 共用同一份判据，不会出现"预检过了 build 还拒"：
+
+```python
+# 形态 A：已经链好的 builder（推荐）
+builder = AgentBuilder().with_tool_plugin(MyToolPlugin())
+errors = builder.validate_plugins()          # list[KrowSDKError]，空 = 合规
+assert not errors, "\n".join(str(e) for e in errors)
+
+# 形态 B：纯函数，连 builder 都不用建
+from krow_agent_sdk.plugins import validate_plugin_ids
+
+errors = validate_plugin_ids({                # 声明式：显式说明走哪个 protocol
+    "ToolPlugin": [MyToolPlugin()],
+    "ACTPlugin": [MyACTPlugin()],
+})
+
+errors = validate_plugin_ids([p1, p2])        # 便利式：protocol 由 isinstance 判定
+```
+
+两者都**一次返回全部违规**（不是第一个），所以多个 plugin 命名不合规时可以一轮改完，不必改一个重启一次。合法的 protocol 标签见 `krow_agent_sdk.plugins.protocol_labels()`。
+
+| API | 签名 | 说明 |
+|---|---|---|
+| `AgentBuilder.validate_plugins()` | `() -> list[KrowSDKError]` | 预检已注册 plugin，不抛 |
+| `plugins.validate_plugin_ids(plugins)` | `(Mapping[str, Sequence] \| Iterable) -> list[KrowSDKError]` | 纯函数预检 |
+| `plugins.validate_plugin_id(pid)` | `(str) -> None` | 单个 ID，不合法即抛 `InvalidPluginIDError` |
+| `plugins.protocol_labels()` | `() -> tuple[str, ...]` | 九个合法 protocol 标签 |
+| `plugins.PLUGIN_ID_PATTERN` | `re.Pattern` | 格式正则（只读） |
 
 ### §5.1 `ACTPlugin` — 加新 ACT (P1)
 
@@ -3304,7 +3480,7 @@ RuntimeError
     └── Plugin 类
         ├── PluginSignatureMismatchError  # plugin 实现签名与 Protocol 不一致
         ├── InvalidPluginIDError          # plugin_id 不符合 <org>.<plugin_name> 双段命名
-        ├── DuplicatePluginIDError        # 进程内 plugin_id 撞名
+        ├── DuplicatePluginIDError        # 同一 protocol 内 plugin_id 撞名
         └── PluginLoadError               # plugin import / on_load 抛异常
 ```
 
@@ -3322,7 +3498,7 @@ RuntimeError
 | `ProjectRootNotWritableError` | `validate_connection=True` 时项目根写权限测试失败 | `project_root` |
 | `PluginSignatureMismatchError` | plugin 加载期 `_protocol_validator` 校验失败 | `plugin_id` / `protocol_name` / `method` / `expected_sig` / `actual_sig` |
 | `InvalidPluginIDError` | plugin_id 不合法 | `plugin_id` |
-| `DuplicatePluginIDError` | 同进程 plugin_id 撞名 | `plugin_id` / `conflict_entry` / `existing_entry` |
+| `DuplicatePluginIDError` | **同一 protocol 内** plugin_id 撞名 | `plugin_id` / `protocol` / `conflict_entry` / `existing_entry` |
 | `PluginLoadError` | plugin entry_points 加载 / on_load 抛 | `plugin_id` / `reason` / `location` |
 
 ### §12.3 黄金模板示例（`MissingKrowAPIKeyError`）

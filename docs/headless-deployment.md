@@ -100,7 +100,7 @@ docker run --rm -e KROW_API_KEY=sk-user-xxxxx my-krow-agent:0.1
 | 变量 | 来源 | 必填 | 用途 |
 |---|---|---|---|
 | `KROW_API_KEY` | **应用层读** → 显式传 `AgentBuilder.with_krow_api_key(...)` | ✅ | Krow Cloud 鉴权 token |
-| `KROW_DATA_DIR` | **SDK 自动读** (`modules/utils/portable_path.py` 0.8.12.15+) | 推荐 | 显式指定可写数据目录；不设则按 XDG / `~/Library/Application Support` / `%APPDATA%` 回退 |
+| `KROW_DATA_DIR` | **SDK 自动读** (`modules/utils/portable_path.py` 0.8.12.15+) | 推荐 | 显式指定可写数据目录；**不设**时按 XDG / `~/Library/Application Support` / `%APPDATA%` 回退。**设了但不可写 → 启动期 fail-loud，不静默换目录**（见 [Q11](#q11-启动即崩无法建立可写目录--krow_data_dir)） |
 | `KROW_BASE_URL` | **应用层读** → 显式传 `AgentBuilder.with_base_url(...)` | 可选 | 自定义 Cloud endpoint（staging / 私有化部署） |
 | `PYTHONUNBUFFERED=1` | Python runtime | 推荐 | 容器内日志即时输出 |
 
@@ -485,6 +485,56 @@ logging.info("metacog=%s actuation=%s",
 **跑起来之后怎么确认真生效**：订阅 `cognitive.*` 事件（`run_stream` 默认已含 `cognitive.actuated`），或读结案 `result.metacog_decision_stats`——`actuations` 按决策名计数，`actuation_sources` 按来源类分档。注册快照回答"我注册上了吗"，这两个才回答"它真开火了吗"。
 
 > 慢环 overlay（睡眠期蒸馏结果）是另一回事：那个**要**持久化，`KROW_DATA_DIR` 必须挂 PVC，否则每次 Pod 重建都从零学起。见 [`advanced-development-guide.md`](./advanced-development-guide.md) §9.4。
+
+### Q11: 启动即崩「无法建立可写目录」 / `KROW_DATA_DIR`
+
+**症状**：Pod `CrashLoopBackOff`，`/readyz` 从未 bind，stdout 是一条：
+
+```
+❌ 无法建立可写目录：/data/krow
+原因：路径来自环境变量 KROW_DATA_DIR（headless 容器的一等公民配置）；
+      建目录时被系统拒绝（PermissionError: [Errno 13] Permission denied）。
+位置：来源 = KROW_DATA_DIR。
+你可以：
+  1) 检查挂载卷的属主与权限——容器以非 root 跑时，卷根目录需属于容器 uid：...
+```
+
+**根因**：几乎总是**两处独立配置对不上**——`KROW_DATA_DIR` 指向的卷属主是 `root:root`（新建 PVC 的默认），而 Pod 以非 root（`runAsUser: 1000`）跑。两边各自都"配对了"，只有交叉起来才错。
+
+**修法**（任选其一）：
+
+1. 给 Pod 设 `fsGroup`，让 kubelet 在挂载时把卷组属主改成容器 gid：
+
+   ```yaml
+   securityContext:
+     runAsNonRoot: true
+     runAsUser: 1000
+     fsGroup: 1000          # ← 这一行
+   ```
+
+2. 或用 `initContainer` 显式 chown（`fsGroup` 对某些 CSI driver 无效时）：
+
+   ```yaml
+   initContainers:
+     - name: fix-perms
+       image: busybox
+       command: ["sh", "-c", "chown -R 1000:1000 /data/krow"]
+       volumeMounts:
+         - name: krow-data
+           mountPath: /data/krow
+       securityContext: { runAsUser: 0 }
+   ```
+
+3. 或把 `KROW_DATA_DIR` 指到确实可写的路径（如 `emptyDir` 挂载点）。⚠️ `emptyDir` 随 Pod 生命周期消失——凭证与慢环 overlay 都在这个根下，Pod 重建即从零开始。
+
+**为什么 SDK 不自动回退到 `~/.local/share/krow`**：`KROW_DATA_DIR` 是编排层对"数据落哪"的**声明**。静默换目录等于把状态与凭证（`data/auth/`）写进没人挂载的容器临时层——Pod 一重启即丢，而日志上只有一条 WARNING。配错了当场喊，比跑到一半丢数据便宜。
+
+**自检**：镜像里跑一句就能在部署前验证——
+
+```bash
+kubectl run perm-probe --rm -it --image=<your-image> --overrides='{...你的 securityContext + volume...}' \
+  -- python -c "from modules.utils.portable_path import probe_writable_root; print(probe_writable_root())"
+```
 
 ---
 
