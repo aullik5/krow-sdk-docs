@@ -2251,6 +2251,7 @@ class EventBusReader:
     def subscribe(
         self, topic: str, handler: Callable[[Any], None],
         *, track_recent: bool = False,
+        dedup: bool = False, owner: Any = None,
     ) -> str: ...
     def unsubscribe(self, token: str) -> None: ...
     def iter_recent(self, topic_pattern: str, n: int = 100) -> Iterator[Any]: ...
@@ -2258,9 +2259,18 @@ class EventBusReader:
 
 | 方法 | 说明 |
 |---|---|
-| `subscribe(topic, handler, *, track_recent=False) -> token` | 订阅；`track_recent=True` 时把命中的事件存入本 reader 的 ring buffer 供 `iter_recent` 读取（默认 False，不占内存） |
+| `subscribe(topic, handler, *, track_recent=False, dedup=False, owner=None) -> token` | 订阅；三个 kw-only 开关见下表 |
 | `unsubscribe(token)` | 取消订阅 |
 | `iter_recent(topic_pattern, n=100)` | 读最近 N 条事件（用于 UI debug / 慢启动 backfill）；只读快照，不影响 EventBus 状态；目前**不支持通配符**（精确 topic 名匹配） |
+
+| `subscribe` 开关 | 默认 | 说明 |
+|---|---|---|
+| `track_recent` | `False` | 把命中的事件存入本 reader 的 ring buffer，供 `iter_recent` 读取。默认关以免无关订阅占内存 |
+| `dedup` | `False` | 同一 `(topic, handler)` 已注册时**跳过**重复订阅、返回旧 token。反复重建订阅方（宿主每次切项目 / 重连都重新 `subscribe`）用它根治"同一事件被回调 N 次"。判重按 handler **对象身份**，所以传的必须是同一个函数对象（每次现造一个 lambda 判不了重） |
+| `owner` | `None` | 把这条订阅的寿命**作用域化**到该对象：总线只对 `owner` 持弱引用，`owner` 被回收时它名下的订阅自动摘除。默认 `None` = 订阅表强引用 handler，寿命由你自己 `unsubscribe` 管 |
+
+> `dedup` / `owner` 自 0.9.2.4 起透出。此前两个形参在实现侧（`EventBus.subscribe`）一直存在，
+> 只是公共门面没有透传，于是从 SDK 完全够不到。
 
 #### handler 签名
 
