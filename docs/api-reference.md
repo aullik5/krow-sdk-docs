@@ -73,6 +73,7 @@
   - [§9.8 慢环自进化 — `Agent` 侧读写入口](#98-慢环自进化--agent-侧读写入口)
   - [§9.9 `delivery` — 重提守门](#99-delivery--重提守门)
   - [§9.10 卡住播报的回应入口 — `Agent.answer_stall`](#910-卡住播报的回应入口--agentanswer_stall)
+  - [§9.11 `honesty` — 系统披露的定界与剥离](#911-honesty--系统披露的定界与剥离)
 - [§10. Telemetry 反向遥测](#10-telemetry-反向遥测)
 - [§11. Test SDK — 开发者写 plugin 的测试工具](#11-test-sdk--开发者写-plugin-的测试工具)
 - [§12. Errors — 错误层与黄金模板](#12-errors--错误层与黄金模板)
@@ -1030,7 +1031,9 @@ def run(
 | `success` | `bool` | 任务是否成功 |
 | `solution` | `str` | LLM 给出的最终解释（自然语言） |
 | `execution_result` | `dict` | macro 步骤执行汇总（含每个 macro 的 success / output / error） |
-| `final_output` | `str` | 最终交付内容（如生成的 markdown / 报告全文） |
+| `final_output` | `str` | 最终交付内容（如生成的 markdown / 报告全文）。**可能带引擎追加的系统披露**，抽结论请用下一行 |
+| `final_output_clean` | `str` | 同上，但剥掉了系统披露（哨兵定界，详 [§9.11](#911-honesty--系统披露的定界与剥离)） |
+| `system1_honesty_payload` | `list[dict]` | 本轮系统披露的机读副本 `[{"kind", "text", "prepend"}]` |
 | `metadata` | `dict` | 运行时 metadata（macro 步数、micro 调用数、LLM 调用次数、用时） |
 
 #### 结构化诊断字段（**不分成败都可能非空**）
@@ -2355,7 +2358,7 @@ for item in agent.run_stream("..."):
 | 类别 | topic | payload 主字段 |
 |---|---|---|
 | 任务生命周期 | `agent.task_start` | `user_input` / `session_id` |
-| 任务生命周期 | `agent.task_complete` | `success` / `final_output` / `metadata` |
+| 任务生命周期 | `agent.task_complete` | `success` / `final_output` / `metadata` / `system1_honesty_blocks` |
 | 任务生命周期 | `agent.task_failed` | `error_type` / `error_msg` |
 | 任务生命周期 | `agent.task_cancelled` | `reason` |
 | Macro ReACT | `macro_react.plan_created` | `todos` (list) |
@@ -3385,6 +3388,58 @@ for item in agent.run_stream("……"):
 **别在宿主侧硬编码"一律 `wrap_up_now`"**：出口是按卡住种类给的——`blind_spot`（信息不足）把 `add_context` 排在推荐位，`conclude_blocked`（约束冲突）把 `wrap_up_now` 排在推荐位，`actionable=False` 的降级结案一个出口都不给。合理的策略分级是"第一次停滞给上下文、再次停滞收尾"，照 `exits` 的顺序取首项即可拿到推荐项。
 
 **为什么不是 `event_bus.publish(...)`**：`EventBusReader` 是[只读](#61-eventbusreader)的，这是它存在的理由（plugin 只能读、不能反向写主流程）。开一个通用 publish 等于把只读读者变成任意写者；带白名单也一样——白名单会稳定增长，而 topic 是字符串、校验不了语义。所以控制路径上每加一种能力，就加一个语义窄、可校验、能回报结果的具名方法。同理**不要**去碰任何私有属性拼这条通路：那不在 [§14](#14-版本兼容性--稳定性--deprecation) 的稳定性承诺内。
+
+---
+
+### §9.11 `honesty` — 系统披露的定界与剥离
+
+```python
+from krow_agent_sdk.honesty import strip_system1_honesty_blocks
+```
+
+`final_output` 里除了智能体自己写的正文，还可能被引擎追加**系统披露**：截断了、产物没齐、验收没达标。这些是 System-1 的如实交代（"准确性 > 完整性"，见 [AGENTS.md](../../AGENTS.md) §0.0），面向的是**读正文的人**，所以它们必须在正文里可见。
+
+但宿主如果按正文抽结论，就会把披露当成智能体的输出。已实测到的形状：验收员那一步末尾被追加了 `final_verification_shortfall` 披露，句子是"验收本身没达标"，宿主把它读成了"被验收的产物不合格"，于是组员白返工。
+
+所以每段披露都用**成对哨兵**定界，剥离按哨兵做，不按文案做：
+
+```text
+<!-- krow:s1-honesty kind=final_verification_shortfall -->
+⚠️ 系统最终验证判定：...
+<!-- /krow:s1-honesty -->
+```
+
+| 入口 | 签名 | 用途 |
+|---|---|---|
+| `strip_system1_honesty_blocks(text)` | `-> (clean_text, [{"kind", "text"}, ...])` | 按哨兵切开：干净正文 + 结构化披露列表 |
+| `honesty_blocks_payload(blocks)` | `-> [{"kind", "text", "prepend"}, ...]` | 把引擎内部登记表规整成对外形状（一般不需直接调） |
+| `S1_BLOCK_OPEN_PREFIX` / `S1_BLOCK_CLOSE` | `str` | 哨兵字面量。做流式增量剥离时才需要 |
+| `KNOWN_HONESTY_KINDS` | `tuple[str, ...]` | 当前引擎会产出的 kind，**参考用、非穷尽** |
+
+结果对象上有两条现成的属性，不必自己调剥离：
+
+| 属性 | 类型 | 含义 |
+|---|---|---|
+| `result.final_output_clean` | `str` | `final_output` 去掉所有系统披露后的正文。**抽裁决 / 抽结论请用这个** |
+| `result.system1_honesty_payload` | `list[dict]` | 本轮所有披露，`[{"kind", "text", "prepend"}]` |
+
+同一份数据也随终局事件与持久化元数据一起给出，异步宿主不必等 `AgentRunResult`：
+
+| 通道 | 位置 |
+|---|---|
+| 事件 | `agent.task_complete` payload 的 `system1_honesty_blocks` |
+| 后台任务 / 推理结果 | `metadata["system1_honesty_blocks"]` |
+
+```python
+verdict = parse_verdict(result.final_output_clean)      # 只看智能体写的
+for block in result.system1_honesty_payload:
+    if block["kind"] == "final_verification_shortfall":
+        escalate_to_human(block["text"])                # 披露另走一条腿
+```
+
+> ⚠️ **不要按 kind 名做白名单剥离。** `KNOWN_HONESTY_KINDS` 会随引擎新增披露而变长，按名字过滤等于新 kind 一律漏剥。剥离的判据是哨兵，kind 只用于**分流**已剥出来的那些。
+> ⚠️ **不要按文案做正则剥离。** 披露正文由 LLM 参与撰写，措辞会变；更麻烦的是用户自己的正文可能含有同样的句子（被审查对象与批评它的句子撞车是常态），按文案匹配两个方向都会错。
+> ⚠️ **剥了要有人接。** 披露本身是"系统承认这次没做到"的唯一凭据。剥掉之后既不展示也不上报，等于把 fail-loud 改回了静默放行——那比污染更贵。
 
 ---
 
