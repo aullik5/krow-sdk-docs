@@ -16,12 +16,11 @@
 
 ### Step 2: 装 SDK（公开包 + 私有 runtime）
 
-> **当前发布状态**（2026-05-19 W5 closeout）：✅ **PyPI 三件套全齐 + 一行装齐**：
-> - ✅ `krow-agent-sdk==0.8.12.28` 已发 PyPI 主站（hotfix 28 — entry-agnostic `ai_search` 注册修复）
-> - ✅ `krow-sdk-install==0.8.12.11` 已发 PyPI 主站（W5 首发，CLI 自身无 hotfix 28 影响）
-> - ✅ `krow-agent-sdk-runtime==0.8.12.28` 在 prod TOS（hotfix 28 closeout，9 wheel matrix + CI P0 tool registration smoke 守门）
-> - ✅ 三 cookbook real LLM E2E **多次 stable PASSED**（W5 user-value oriented + 5 P0 bug 治本）
-> 详见 [`CHANGELOG_v0.8.12.11.md`](./CHANGELOG_v0.8.12.11.md) + [`v0.8.12.11-readiness-status.md`](./v0.8.12.11-readiness-status.md)。
+> **当前发布状态**（2026-09-15）：✅ **PyPI 三件套全齐 + 一行装齐**：
+> - ✅ `krow-agent-sdk==0.9.2.10` 已发 PyPI 主站（2026-09-15）
+> - ✅ `krow-sdk-install` 已发 PyPI 主站（`pip install -U krow-sdk-install` 取最新即可）
+> - ✅ `krow-agent-sdk-runtime==0.9.2.10` 在 prod TOS（与 SDK 同版发布，9 wheel matrix + CI P0 tool registration smoke 守门）
+> - ✅ cookbook 12 个 demo 三平台（Linux / macOS / Windows）× 3 Python（3.11-3.13）smoke 每 PR 守门；real LLM E2E nightly 跑
 
 #### 推荐：一行 PyPI 装机（公开 SDK + install CLI）
 
@@ -605,4 +604,4 @@ agent = (
 
 欢迎入坑！
 
-— Krow Team · 2026-05-16（配套 `0.8.12.5` PyPI release + cloud-team 协议锁定）
+— Krow Team · 2026-09-15（配套 `0.9.2.10` PyPI release）

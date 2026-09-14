@@ -96,6 +96,40 @@ python main.py sample_data/contract.docx \
 | **HintPlugin** × 2 | `AmbiguousLanguageHintPlugin` `MissingDefinitionHintPlugin` | LLM 看到 reasonable / best efforts 不会自动联想风险；hint 推一把 |
 | **EventListenerPlugin** | `LegalAuditTrailListener` | 法务 review 是 SOX / 公司合规强制留痕场景；含合同 sha256 文件指纹保证可追溯 |
 | **ObservabilityPlugin** | `OTelTracingObservabilityPlugin` | 企业 IT 普遍用 OpenTelemetry —— 每个工具一个 span 方便事后审计 / 性能调优 / 异常定位 |
+| **系统披露分流**（SDK 0.9.2.5+） | `main.py::_split_final_output` | 抽审计结论用 `result.final_output_clean`，系统披露走 `result.system1_honesty_payload` 单独分级——防"系统说这次验证没做全"被误读成"合同审出了问题" |
+| **墙钟显式声明**（SDK 0.9.2.9+） | `BudgetSpec.declared_max_walltime_s()` | 显式设的 `max_walltime_s` 连里程碑续期一起管住；保持默认值不算声明 |
+
+---
+
+## 系统披露分流 + 墙钟声明（0.9.2.x 新能力）
+
+### 正文与系统披露分道（0.9.2.5+）
+
+引擎会在 `final_output` 末尾以成对哨兵追加**系统披露**（截断、产物缺页、验收缺口、
+低置信放行等）。披露的主语是「这个 agent 的这次运行」，正文的主语是「被审的那份
+合同」——混在一根字符串里抽结论，会把系统的自我交代误读成合同风险。所以：
+
+```python
+clean = result.final_output_clean          # 抽审计结论只看这个
+for block in result.system1_honesty_payload:
+    route(block["kind"], block["text"])    # 披露单独走自己的路
+```
+
+三条纪律（详 `api-reference.md` §9.11）：
+
+- **别按文案剥**（措辞会变；合同正文与披露句撞车时会误剥用户正文）；
+- **别按 kind 白名单剥**（kind 集合随引擎增长，如 0.9.2.9 新增
+  `final_verification_low_confidence`——最终验证低置信放行时如实交代置信度与
+  未验证项；本 demo 对未知 kind 一律按元评论展示、不丢弃）；
+- **剥了要有人接**（本 demo 把验证类披露升级到 stderr 转人工，其余如实打印）。
+
+### 墙钟显式声明（0.9.2.9+）
+
+`--budget-walltime 600` 会显式声明 `max_walltime_s`，0.9.2.9 起该声明**同时约束
+运行中的里程碑续期**（此前只约束起跑，续期可一路走到运行时绝对天花板）。注意
+**保持默认值 ≠ 声明**：只设 `--budget-llm-calls` 不会把深推理策略的契约档位
+（如 `hypothesis_test` 7200s）静默砍到 dataclass 默认的 1800s。判别入口
+`BudgetSpec.declared_max_walltime_s()`（默认值 / 非正值 → `None`）。
 
 ---
 
@@ -114,7 +148,7 @@ contract-auditor/
 │   └── README.md                      # 自助跑通指南（不预置合同 · 公开模板推荐）
 ├── tests/
 │   ├── conftest.py
-│   └── test_contract_auditor_smoke.py # 50 unit test（System 1 only · 0 LLM 调用）
+│   └── test_contract_auditor_smoke.py # 57 unit test（System 1 only · 0 LLM 调用）
 └── .gitignore                         # 排除 output/ *.pdf *.docx *.audit.jsonl
 ```
 
@@ -202,10 +236,10 @@ financial-analyst demo 演示 Prometheus push gateway（投行 BI 主流），�
 ```bash
 pip install -e .[test]
 pytest tests/
-# 50 passed in <1s
+# 57 passed in <1s
 ```
 
-测试内容：50 个 System 1 unit test 覆盖：
+测试内容：57 个 System 1 unit test 覆盖：
 
 - 通用 helpers（`_normalize_path` / `_golden_error`）
 - `CLAUSE_TAXONOMY` 完整性（15 类 / 必备 3 类 / 高风险 6 类 / 双语关键词）
@@ -220,6 +254,9 @@ pytest tests/
   有且有 marker → ALLOW / 阈值可配）
 - `AmbiguousLanguageHintPlugin` / `MissingDefinitionHintPlugin` 触发条件
 - `LegalAuditTrailListener` `.audit.jsonl` 输出 + sha256 文件指纹
+- System-1 诚实块分流（honesty facade 可 SDK-only import / 正文与披露分道 /
+  未知 kind 按元评论处理不丢弃）
+- `BudgetSpec` 墙钟声明语义（默认值不算声明 / 显式值生效 / 非正值不算）
 
 **0 LLM 调用，CI 可频繁跑**（全部 < 1 秒）。
 

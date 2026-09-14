@@ -4,7 +4,7 @@
 > **进阶资料**：
 > - [`api-reference.md`](./api-reference.md) — 完整 API 手册（15 章 / 57 子节）
 > - [`advanced-development-guide.md`](./advanced-development-guide.md) — TURBO 哲学 / 工具设计 / 测试方法论
-> **适用版本**：`krow-agent-sdk >= 0.8.12.28`。
+> **适用版本**：`krow-agent-sdk >= 0.9.2`（当前发布 `0.9.2.10`，2026-09-15）。历史下限：wheel-only 部署请至少用 `>= 0.8.12.28`（该版修复了 P0 内置工具集 `ai_search` / `llm_generate` / `smart_read_document` / `save_image` 在 wheel 部署模式下的注册缺失）。
 
 ---
 
@@ -21,13 +21,13 @@
 
 ## 1. 安装（30 秒）
 
-> **当前发布状态**（2026-05-19 W5 closeout）：✅ **PyPI 三件套全齐**：
+> **当前发布状态**（2026-09-15）：✅ **PyPI 三件套全齐**：
 > ```bash
-> pip install krow-agent-sdk==0.8.12.28        # 公开 SDK（plugin protocol + facade · hotfix 28 ai_search 注册修复）
-> pip install krow-sdk-install==0.8.12.11      # runtime 安装 CLI（W5 首次 PyPI prod，CLI 自身无 hotfix 28 影响）
+> pip install -U krow-agent-sdk                # 公开 SDK（plugin protocol + facade · 当前 0.9.2.10）
+> pip install -U krow-sdk-install              # runtime 安装 CLI
 > krow-sdk-install --api-key $KROW_API_KEY     # 走 prod gateway 拉 sdk-runtime wheel
 > ```
-> sdk-runtime 0.8.12.28 已可装（hotfix 28 entry-agnostic ai_search 注册修复 · `runtime-v0.8.12.28` tag → TOS prod 已发布；
+> sdk-runtime 与 SDK 同版发布（`runtime-v0.9.2.10` tag → TOS prod 已发布；
 > 9 wheel matrix 含 P0 tool registration smoke step 守门，确保 wheel-only Pod 部署后 `AgentBuilder().build()`
 > 完成时 `ai_search` 等 4 个 P0 工具一定注册到 `ToolManager`）。
 > EULA 当前为 v1.1 DRAFT（含 good-faith 披露），等真律师签字后转 EFFECTIVE
@@ -839,5 +839,5 @@ cloud 当前可选清单 → `GET /v1/models`（按 capability 过滤；详 `mod
 
 ---
 
-> 文档版本：v1.2（2026-05-16，配套 `0.8.12.5` PyPI release + cloud-team 协议锁定）
+> 文档版本：v1.3（2026-09-15，配套 `0.9.2.10` PyPI release）
 > 维护：在 SDK 主版本变化时更新；外部开发者反馈的 FAQ 直接累积到第 8 节。

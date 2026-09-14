@@ -59,7 +59,7 @@ WORKDIR /home/krow
 
 # Step 2: pip install SDK（合并到单一 RUN 层；同样为避免 multi-RUN 瞬态 bug）
 # 注：[all] extras 包含 office/knowledge/remote/visual；按需可缩为 [office] 等
-RUN pip install --user --no-cache-dir "krow-agent-sdk[all]==0.8.12.15"
+RUN pip install --user --no-cache-dir "krow-agent-sdk[all]==0.9.2.10"
 
 # Step 3: 一等公民环境变量（0.8.12.15 起 SDK 直接读 KROW_DATA_DIR）
 ENV PATH="/home/krow/.local/bin:$PATH" \
@@ -178,7 +178,7 @@ CMD ["python", "-m", "my_app"]
 FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
 
 # 注：pytorch 镜像默认 root；如要切非 root 自己加 useradd
-RUN pip install --no-cache-dir "krow-agent-sdk[office]==0.8.12.15"
+RUN pip install --no-cache-dir "krow-agent-sdk[office]==0.9.2.10"
 
 ENV KROW_DATA_DIR=/workspace/krow_data
 # ...

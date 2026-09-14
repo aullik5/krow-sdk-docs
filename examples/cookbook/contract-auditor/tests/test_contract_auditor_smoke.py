@@ -14,6 +14,9 @@
        有且有标记 → ALLOW）
   §11. AmbiguousLanguageHintPlugin / MissingDefinitionHintPlugin 触发条件
   §12. LegalAuditTrailListener .audit.jsonl 输出 + sha256 文件指纹
+  §13. 端到端 5 步管线（不调 LLM）
+  §14. System-1 诚实块分流（0.9.2.5+ honesty facade + main._split_final_output）
+  §15. BudgetSpec 墙钟声明语义（0.9.2.9 declared_max_walltime_s）
 
 要求：全部 < 1 秒跑完，0 LLM 调用，100% deterministic。
 """
@@ -709,3 +712,97 @@ def test_end_to_end_mandatory_gate_passes_on_sample() -> None:
         ]},
     )
     assert decision.verdict.name == "ALLOW"
+
+
+# ============================================================
+# §14. System-1 诚实块分流（SDK 0.9.2.5+ · 0 LLM · SDK-only 可跑）
+# ============================================================
+class _FakeResult:
+    """极简 result 替身（只带分流需要的属性；smoke 不跑真 agent.run）."""
+
+    def __init__(
+        self,
+        final_output: str,
+        clean: str | None = None,
+        payload: list | None = None,
+    ) -> None:
+        self.final_output = final_output
+        if clean is not None:
+            self.final_output_clean = clean
+        if payload is not None:
+            self.system1_honesty_payload = payload
+
+
+def test_honesty_facade_importable_sdk_only() -> None:
+    """``krow_agent_sdk.honesty`` 顶层 import 不碰 runtime（SDK-only 必须成功）."""
+    from krow_agent_sdk.honesty import (
+        KNOWN_HONESTY_KINDS,
+        S1_BLOCK_CLOSE,
+        S1_BLOCK_OPEN_PREFIX,
+    )
+
+    assert S1_BLOCK_OPEN_PREFIX.startswith("<!-- krow:s1-honesty")
+    assert S1_BLOCK_CLOSE == "<!-- /krow:s1-honesty -->"
+    # 本 demo 分级表里点名的两个 kind 必须真实存在（0.9.2.9 起含低置信放行披露）
+    assert "final_verification_shortfall" in KNOWN_HONESTY_KINDS
+    assert "final_verification_low_confidence" in KNOWN_HONESTY_KINDS
+
+
+def test_split_final_output_prefers_clean_channels() -> None:
+    """有 SDK 现成属性时用它们：正文与披露彻底分道."""
+    from main import _split_final_output
+
+    payload = [{"kind": "final_verification_low_confidence",
+                "text": "⚠️ 置信度 0.20，未验证项 2 个", "prepend": False}]
+    result = _FakeResult(
+        final_output="正文<!-- krow:s1-honesty ... -->披露<!-- /krow:s1-honesty -->",
+        clean="正文",
+        payload=payload,
+    )
+    clean, blocks = _split_final_output(result)
+    assert clean == "正文"
+    assert blocks == payload
+
+
+def test_split_final_output_falls_back_on_old_runtime() -> None:
+    """旧 runtime 无剥离属性 → 原样返回，不自己按文案剥（误剥比漏剥更坏）."""
+    from main import _split_final_output
+
+    result = _FakeResult(final_output="原样正文")
+    clean, blocks = _split_final_output(result)
+    assert clean == "原样正文"
+    assert blocks == []
+
+
+def test_disclosure_level_unknown_kind_is_info_not_dropped() -> None:
+    """未知 kind 一律按元评论（info）处理——kind 集合会随引擎增长，禁白名单."""
+    from main import _disclosure_level
+
+    assert _disclosure_level("final_verification_shortfall") == "escalate"
+    assert _disclosure_level("final_verification_low_confidence") == "escalate"
+    assert _disclosure_level("some_future_kind_not_seen_yet") == "info"
+
+
+# ============================================================
+# §15. BudgetSpec 墙钟声明语义（SDK 0.9.2.9 · declared_max_walltime_s）
+# ============================================================
+def test_budgetspec_default_walltime_is_not_a_declaration() -> None:
+    """保持默认值 ≠ 声明：只调 llm_calls 不得连带钉死墙钟（会砍深策略契约档）."""
+    from krow_agent_sdk import BudgetSpec
+
+    assert BudgetSpec().declared_max_walltime_s() is None
+    assert BudgetSpec(max_total_llm_calls=200).declared_max_walltime_s() is None
+
+
+def test_budgetspec_explicit_walltime_is_declared() -> None:
+    """显式设非默认正值 → 声明生效（0.9.2.9 起同时约束里程碑续期）."""
+    from krow_agent_sdk import BudgetSpec
+
+    assert BudgetSpec(max_walltime_s=1200).declared_max_walltime_s() == 1200.0
+
+
+def test_budgetspec_nonpositive_walltime_is_not_declared() -> None:
+    """非正值不是可执行的墙钟上限，按未声明处理."""
+    from krow_agent_sdk import BudgetSpec
+
+    assert BudgetSpec(max_walltime_s=0).declared_max_walltime_s() is None

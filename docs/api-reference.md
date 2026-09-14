@@ -1,7 +1,7 @@
 # Krow Agent SDK · API Reference Manual
 
-> **版本**：`krow-agent-sdk == 0.8.12.5`（Step 2 完成）
-> **最后更新**：2026-05-16
+> **版本**：`krow-agent-sdk == 0.9.2.10`
+> **最后更新**：2026-09-15
 > **稳定性级别**：**Stable**（除"⚠️ experimental"标记的 API 外，其余 API 遵循 SemVer）
 > **配套文档**：
 > - [`quickstart.md`](./quickstart.md) — 5 分钟入门
@@ -33,6 +33,9 @@
   - [§3.3 `Agent.shutdown()` — 资源清理](#33-agentshutdown--资源清理)
   - [§3.4 Agent 只读属性](#34-agent-只读属性)
   - [§3.5 HITL 挂起/续跑 — `with_hitl` / `Agent.resume`](#35-hitl-挂起续跑--with_hitl--agentresume)
+  - [§3.6 执行剖面（execution profile）](#36-执行剖面execution-profile)
+  - [§3.7 `contract_actions` — 让 ACT 声明可直接调用的宏动作](#37-contract_actions--让-act-声明可直接调用的宏动作)
+  - [§3.8 `landing_actions` — 声明"调了它才算交付"](#38-landing_actions--声明调了它才算交付)
 - [§4. 配置 dataclass](#4-配置-dataclass)
   - [§4.1 `BudgetSpec`](#41-budgetspec)
   - [§4.2 `BuilderConfig`](#42-builderconfig)
@@ -1493,6 +1496,34 @@ contract_actions:
 
 > 与 §3.6 的关系：如果你的任务是"取证据 + 交回执"两步，**两个机制选一个**——要么注册 `max_plan_steps=2` 的剖面走正常计划，要么把交回执那一步声明成 `contract_actions` 让它不占步数。不要既钉 `leaf_direct` 又指望把两步塞进一步。
 
+### §3.8 `landing_actions` — 声明"调了它才算交付"（0.9.2.5+）
+
+**问题形状**：引擎的着陆识别（"计划里哪一步是最终交付"）默认判据全部围绕**写文件**。如果你的交付形态是**回调**——比如把裁决经 `worker.submit_verdict` 交回派工方、全程零字节落盘——着陆步会恒判为空。而"着陆步为空"又正是若干收尾护航机制放弃介入的条件：**最需要被导航到交付动作的那一轮，恰好得不到导航**。
+
+**解法**：ACT 在 `__act__.yaml` 里声明哪些工具的调用**本身就构成交付**：
+
+```yaml
+# <your_act>/__act__.yaml
+contract_actions:
+  - worker.submit_verdict
+  - worker.heartbeat
+landing_actions:
+  - worker.submit_verdict     # 只有它是交付；heartbeat 可达但不算
+```
+
+**与 §3.7 `contract_actions` 的分工**（两个字段刻意不合并）：
+
+| 字段 | 回答的问题 | 不声明的后果 |
+|---|---|---|
+| `contract_actions` | macro **调不调得到**（可达性） | LLM 调它撞 `unknown_tool` |
+| `landing_actions` | **调了才算交付完了**（义务） | 回调交付恒判"无着陆步"，收尾护航失效 |
+
+可达而不构成交付的契约动作是常态（心跳 / 回执 / 配额申报）。如果把义务默认加到可达上，"调了一次心跳"就会被误认成"交付完成"——所以必须由 ACT 显式点名。
+
+**约束**：`landing_actions ⊆ contract_actions`——声明为着陆动作的工具必须同时可达，否则 macro 根本调不到它。这是**配置错误**，请在你的 plugin 测试里钉住（主仓由 CI lint 强制；运行期不再校验，因为那时唯一能做的只有静默降级，正是本字段要治的病）。单个字符串也接受（`landing_actions: worker.submit_verdict`）。
+
+主仓 SSOT：`modules/agent/progressive/contract_actions.py:declared_landing_actions`；yaml 字段归一在 `modules/agent/act/act_hierarchy.py:_coerce_landing_actions`。
+
 ---
 
 ## §4. 配置 dataclass
@@ -1516,7 +1547,7 @@ class BudgetSpec:
 | 字段 | 单位 | 默认 | 含义 |
 |---|---|---|---|
 | `target_walltime_s` | 秒 | 600 | 目标墙钟（agent 倾向在此前完成；超过触发 adapt extension 协商） |
-| `max_walltime_s` | 秒 | 1800 | **硬上限**墙钟；超过 fail-loud 中断 |
+| `max_walltime_s` | 秒 | 1800 | **硬上限**墙钟；超过 fail-loud 中断。**0.9.2.9 起显式声明的值同时约束运行中的里程碑续期**（此前只约束起跑，续期可一路走到运行时绝对天花板）。注意：**保持默认值 ≠ 声明**——只有你显式设了非默认正值才注入墙钟判据，deep 推理策略（如 `hypothesis_test` 契约档 7200s）不会被 dataclass 默认的 1800 静默砍掉。判别入口：`BudgetSpec.declared_max_walltime_s()`（默认值 / 非正值 → `None`） |
 | `max_total_llm_calls` | 次 | 120 | 进程级 LLM 调用上限（macro + micro 总和） |
 | `max_adapt_extensions` | 次 | 3 | **adapt budget extension** 触发次数上限（单个 plan step 内"再追加一步"的次数；**不是** macro plan 总步数，后者见 `max_plan_steps`） |
 | `max_replans` | 次 | 3 | macro replan 触发次数上限 |
@@ -3397,7 +3428,7 @@ for item in agent.run_stream("……"):
 from krow_agent_sdk.honesty import strip_system1_honesty_blocks
 ```
 
-`final_output` 里除了智能体自己写的正文，还可能被引擎追加**系统披露**：截断了、产物没齐、验收没达标。这些是 System-1 的如实交代（"准确性 > 完整性"，见 [AGENTS.md](../../AGENTS.md) §0.0），面向的是**读正文的人**，所以它们必须在正文里可见。
+`final_output` 里除了智能体自己写的正文，还可能被引擎追加**系统披露**：截断了、产物没齐、验收没达标。这些是 System-1 的如实交代（"准确性 > 完整性"，见 [AGENTS.md](../../AGENTS.md) §0.0），面向的是**读正文的人**，所以它们必须在正文里可见。披露种类会随引擎演进增长——例如 0.9.2.9 起新增 `final_verification_low_confidence`：最终验证在低置信（confidence < 0.70）下放行时，置信度、未验证项与未处理失败步会如实披露到最终回复（此前这条信息只活在日志里，用户全程不知情）。
 
 但宿主如果按正文抽结论，就会把披露当成智能体的输出。已实测到的形状：验收员那一步末尾被追加了 `final_verification_shortfall` 披露，句子是"验收本身没达标"，宿主把它读成了"被验收的产物不合格"，于是组员白返工。
 

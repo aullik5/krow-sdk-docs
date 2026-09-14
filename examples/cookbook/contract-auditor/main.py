@@ -47,6 +47,10 @@
 - ObservabilityPlugin × 1（OTelTracingObservabilityPlugin：每个 tool 一个 span
   + gate BLOCK 标 ERROR；推 OTLP collector）
 - BudgetSpec：60 LLM × 600s（合同 review 偏交互式不能等太久）
+  · 0.9.2.9 起显式声明的 max_walltime_s 连里程碑续期一起管住（默认值不算声明）
+- System-1 诚实块分流（0.9.2.5+）：正文抽结论用 result.final_output_clean，
+  系统披露（result.system1_honesty_payload）单独分级展示——验证类披露转人工，
+  未知 kind 一律按元评论处理（kind 集合会随引擎增长，别写白名单）
 """
 from __future__ import annotations
 
@@ -66,6 +70,54 @@ from contract_auditor_plugin import (
     MissingDefinitionHintPlugin,
     OTelTracingObservabilityPlugin,
 )
+
+# ────────────────────────────────────────────────────────────────────
+# System-1 诚实块分流（SDK 0.9.2.5+）
+#
+# 引擎会把系统披露（截断 / 产物缺页 / 验收缺口 / 低置信放行等）以成对哨兵
+# 追加进 ``final_output``。法务场景按正文抽"审计结论"时必须用剥离后的正文：
+# 披露的主语是「这个 agent 的这次运行」，正文的主语是「被审的那份合同」，
+# 混在一根字符串里抽结论，会把"系统说这次验证没做全"误读成"合同审出了问题"。
+# ────────────────────────────────────────────────────────────────────
+
+#: 需要人工复核的披露 kind（其余一律按元评论打印、不升级）。
+#: 注意这不是白名单剥离——kind 集合会随引擎增长（如 0.9.2.9 新增
+#: ``final_verification_low_confidence``：最终验证低置信放行时如实交代
+#: 置信度与未验证项），未知 kind 也必须展示，只是不升级到人工。
+_ESCALATE_KINDS = frozenset(
+    {"final_verification_shortfall", "final_verification_low_confidence"}
+)
+
+
+def _disclosure_level(kind: str) -> str:
+    """披露分级：``escalate``（转人工复核）或 ``info``（如实展示即可）。"""
+    return "escalate" if kind in _ESCALATE_KINDS else "info"
+
+
+def _split_final_output(result) -> tuple[str, list[dict]]:
+    """把最终回复拆成〔智能体正文, 系统披露列表〕。
+
+    优先走 SDK 现成属性（``final_output_clean`` / ``system1_honesty_payload``，
+    0.9.2.5+），不自己按文案剥——按文案剥两个方向都会错（措辞一改就漏剥；
+    合同正文与披露句撞车时误剥用户正文）。旧 runtime 无这两个属性时退回
+    原始 ``final_output``（不剥，宁可多看到披露也不吞正文）。
+    """
+    clean = getattr(result, "final_output_clean", None)
+    blocks = getattr(result, "system1_honesty_payload", None)
+    if clean is None or blocks is None:
+        return (result.final_output or ""), []
+    return clean, list(blocks)
+
+
+def _print_disclosures(blocks: list[dict]) -> None:
+    """把系统披露与正文分开打印（披露剥了必须有人接，不能静默丢）。"""
+    for block in blocks:
+        kind = str(block.get("kind", ""))
+        text = str(block.get("text", "")).strip()
+        if _disclosure_level(kind) == "escalate":
+            print(f"\n🚨 系统披露（{kind} · 建议人工复核）：\n{text}", file=sys.stderr)
+        else:
+            print(f"\nℹ️  系统披露（{kind}）：\n{text}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -254,8 +306,15 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.budget_replans is not None:
             budget_kwargs["max_replans"] = args.budget_replans
-        builder = builder.with_budget(BudgetSpec(**budget_kwargs))
+        budget = BudgetSpec(**budget_kwargs)
+        builder = builder.with_budget(budget)
         print(f"  💰 budget: {budget_kwargs}")
+        # 0.9.2.9 起：**显式声明**的 max_walltime_s 同时约束运行中的里程碑续期
+        # （此前只约束起跑）。保持默认值 ≠ 声明——只调 llm_calls 的用法不会把
+        # deep 推理策略的契约档位（如 hypothesis_test 7200s）静默砍到 1800s。
+        declared_wall = budget.declared_max_walltime_s()
+        if declared_wall is not None:
+            print(f"  ⏱️ 墙钟声明：{declared_wall:.0f}s（含里程碑续期在内的硬上限）")
 
     if args.reasoning_model:
         builder = builder.with_reasoning_model(args.reasoning_model)
@@ -281,18 +340,23 @@ def main(argv: list[str] | None = None) -> int:
         # 用户拿到的产物是完整可读的. 用户价值优先于 agent 自评 → 文件存在
         # 且 ≥ 800B 即视为成功.
         artifact_ok = md_path.exists() and md_path.stat().st_size >= 800
+        # 正文与系统披露分道（0.9.2.5+；详 README「系统披露分流」一节）：
+        # 抽结论 / 打印摘要用干净正文，披露单独分级展示。
+        clean_output, disclosures = _split_final_output(result)
         if not result.success:
             if artifact_ok:
                 print(
                     f"\n⚠️  agent 自评失败但 markdown 已落盘 → 视为成功"
                     f"（{md_path.stat().st_size}B; agent_msg: "
-                    f"{(result.final_output or '')[:200]}）",
+                    f"{clean_output[:200]}）",
                     file=sys.stderr,
                 )
             else:
-                print(f"\n❌ 任务失败：{result.final_output}", file=sys.stderr)
+                print(f"\n❌ 任务失败：{clean_output}", file=sys.stderr)
+                _print_disclosures(disclosures)
                 return 1
         print(f"\n📝 风险报告 markdown：{md_path}")
+        _print_disclosures(disclosures)
         if docx_path and docx_path.exists():
             print(f"📄 docx：{docx_path}")
         if pdf_path and pdf_path.exists():
