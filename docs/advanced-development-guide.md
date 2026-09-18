@@ -590,11 +590,12 @@ micro ReACT Phase-2 prompt 需要从 extended.md 提取**每个工具的完整�
 - 工具 > 10 + 工程化跨步骤契约（step / phase / 门禁矩阵）→ **写法 B**
 - 两种**可同时用**（写法 A 章节会覆盖写法 B 表格行；SDK 优先 heading）
 
-**⚡ 自动文档兜底（2026-05-27 PR-1）**：如果你只在 `ToolPlugin.get_tools()` 里
-声明了 `input_schema`，SDK 会**自动**用 `ACTDocGenerator` 生成 `### tool_name +
-参数表 + JSON 示例` 注入到 extended.md 末尾 —— **不用在 ACT markdown 里再写一遍参数表**。
-你只需在 ACT extended.md 里写"跨工具约束 / 工作流 / 门禁"等 System 2 内容。
-详 §4.9。
+**⚡ 自动文档兜底（2026-05-27 PR-1；2026-09-18 T5 收敛为最小完整形态）**：如果你
+只在 `ToolPlugin.get_tools()` 里声明了 `input_schema`，SDK 会**自动**生成
+`### tool_name + 一行摘要 + 最小 JSON 用例` 的紧凑小节注入到 extended.md 末尾 ——
+**不用在 ACT markdown 里再写一遍参数表**（完整参数 schema 走工具正解通道逐字送达，
+自动文档不再复述参数表）。你只需在 ACT extended.md 里写"跨工具约束 / 工作流 / 门禁"
+等 System 2 内容。详 §4.9。
 
 ### 4.3 `__act__.yaml` 写法
 
@@ -949,25 +950,33 @@ class MyAnalyticsToolPlugin:
 
 **SDK 自动做的事**（`modules/agent/sdk/auto_tool_doc.py`）：
 
-1. 注册时调 `ACTDocGenerator.generate_tool_doc(spec)` 生成完整 markdown：
+1. 注册时生成**最小完整形态** markdown 小节（2026-09-18 T5 起；此前生成
+   参数表 + 完整描述，与 schema 正解通道逐字重复，在 4KB supplement 配额下
+   反而挤掉了别的工具文档）：
    ```markdown
    ### data_analyst_compute_stats
 
    对 CSV 数值列做 mean/std/min/max 统计
 
-   | 参数 | 类型 | 必填 | 说明 |
-   |---|---|---|---|
-   | path | string | 是 | CSV 路径 |
-   | columns | string[] | 是 | 要统计的列名 |
-
    ```json
-   {"tool_name": "data_analyst_compute_stats", "tool_args": {}}
+   {"tool": "data_analyst_compute_stats", "arguments": {"path": "...", "columns": []}}
    ```
    ```
+   一行摘要取 `quick_meta.desc`（否则 description 首句）；最小用例取
+   `quick_meta.params` 作者示例（否则按 `required` 字段派生占位）；
+   `quick_meta` 的 `note` / `sensitivity` 会作为语义附加保留。
+   **参数表 / 枚举明细 / 描述全文不再生成** —— LLM 从工具 schema 正解通道
+   逐字拿到它们，supplement 里复述只会消耗配额。
 
 2. 缓存到进程级 SSOT `_TOOL_DOC_REGISTRY[tool_name]`
 3. ACTPlugin 加载时注册 `extended_md_supplement_provider`，按需把工具文档拼接注入到对应 ACT 的 `extended.md` 末尾
 4. `_parse_extended` 重新 parse 合并后的内容，`all_tools` 全部可用
+
+**预算 fail-loud（T5）**：supplement 装配时按"公平份额 = 4KB 配额 ÷ 工具数"审计，
+单工具超份额 → ERROR 指名（出路：精简该工具 `quick_meta` 的注意/示例附加）；全部
+小节总量仍超配额 → 触发「提额重议」ERROR（此时内容已是最小完整形态，超出部分是
+真实容量缺口，义务方是配额所有者，SDK 不会以此要求你削减最小形态）。审计读数可用
+`get_delivery_report(plugin_id)` 查询。
 5. micro ReACT Phase-2 prompt 看到所有工具完整契约
 
 **防重复注入**：若你在 ACT extended.md 已手写 `### <tool_name>` heading（说明
