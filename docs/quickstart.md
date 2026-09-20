@@ -661,6 +661,7 @@ finally:
 | `KROW_SDK_TELEMETRY` | `0` | opt-in 上报 SDK 使用统计（不含敏感数据） |
 | `KROW_SDK_HTTP_GATEWAY` | `0` | opt-in 启动 HTTP gateway，让外部 UI 通过 HTTP 调 SDK |
 | `KROW_SDK_BUILD_VALIDATE_CONNECTION` | `1` | build() 内 GET /v1/models 验证 + 模型 fallback |
+| `KROW_SDK_TERMINAL_EXECUTE` | scope 默认 | 终端执行工具（shell-first）开关：SDK 嵌入默认**关**、headless 容器默认开；行为契约详 [`advanced-development-guide.md` §13](./advanced-development-guide.md) |
 
 ### 6.1 自定义 cloud endpoint（staging / 私有部署 / 自动化测试）
 

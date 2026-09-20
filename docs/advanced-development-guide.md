@@ -29,6 +29,7 @@
 | §10 | 配置决策脑三注册表 + 控制反射带（观测层 / 唤醒层 / 结算层 / 致动 + 领域轴 + 零注册信号包络；**§10.10 = 能力边界三档，注册之前先读**） | 想让决策脑对你的任务"看得见、叫得醒、算得清、动得了手" |
 | §11 | 多 Agent 轻量协同（A 侧 persona + B 侧 delegate） | 需要多角色分工 |
 | §12 | 对话槽硬绑 ACT + 工具宇宙裁剪 | 需要按会话收窄工具面 |
+| §13 | Shell-first 终端执行（`terminal_execute` 行为契约 + 与专用工具的边界） | 用/关终端工具、部署无人值守场景前 |
 
 ---
 
@@ -2784,6 +2785,124 @@ result = leader.run("产出一份市场调研简报，拆解后逐个派给团�
 - 需要**确定性**禁止漂移（对话槽固定角色）→ `with_locked_act`。
 - 只想**优先**某 ACT 但仍允许 LLM 跨域兜底 → 只传 `task_context.act_name`（软提示）。
 - 锁 ACT 解决「用哪个工作流 + 哪些工具」；persona（§2.4.1 `with_agent_identity` / `with_persona_directives`）解决「你是谁 + 行为纪律」。对话槽组长通常**三者合用**：锁 team_leader + 组长身份 + 「只派单不自办」纪律。
+
+---
+
+## §13 Shell-first 终端执行：`terminal_execute` 行为契约
+
+> Krow Agent 内置终端执行工具族（`terminal_execute` + `terminal_poll`）。本节是它对
+> plugin 作者与部署方的行为契约：什么时候可用、审批怎么走、超时 / 输出 / 失败长什么样、
+> 以及它与专用工具的边界。容器部署侧差异详
+> [`headless-deployment.md`](./headless-deployment.md) §5.4。
+
+### 13.1 shell-first 是什么（架构定位）
+
+- **shell 是基础设施级、全局可见的通用工具**：agent 可以用它跑项目命令、调系统工具、
+  写并执行自己生成的脚本，完成文件与系统层面的操作 —— 与主流 coding agent 的
+  bash-first 形态对齐。
+- **专用工具仍然优先**：terminal 定位是"专用工具做不了的事"的通用兜底，**不是首选**。
+  引擎的引导层持续把有专用工具的任务导向专用工具（边界规则见 §13.5）。
+- **安全边界不靠命令白名单**：语法级命令分级词表已退役为"确认粒度信号"（用户开启
+  打断式确认时，已知只读命令不问、其余问）。真正的防线是三层：
+  1. **确定性层**（System 1，fail-loud）：容器隔离（headless）/ 工作目录沙箱（桌面）
+     + 宿主毁伤类命令熔断黑名单（两种环境都永不放行）；
+  2. **知情层**：每条命令的事后披露事件（含命令与输出尾窗，已脱敏）+ 用户可选的
+     打断式确认；
+  3. **语义层**：可选的 LLM 语义审查钩子（默认关，逐命令判 allow/block）。
+
+### 13.2 注册与默认（三种 scope）
+
+| scope | 默认 | 审批 | 执行 profile | 开 / 关 |
+|---|---|---|---|---|
+| 桌面 GUI | 注册 | 跟用户设置（默认不打断，事后披露卡片） | `desktop` | 设置页"执行前先问我" |
+| headless（容器服务） | **注册**，免确认 | 无（事件落盘审计代替确认观众） | `container` | `KROW_SDK_TERMINAL_EXECUTE=0` 显式关闭 |
+| sdk_runtime（外部开发者嵌入） | **不注册** | opt-in 后免确认 | `desktop`（保守） | `KROW_SDK_TERMINAL_EXECUTE=1` 或 feature_flags.json `sdk_terminal_execute_enabled=true` |
+
+- env `KROW_SDK_TERMINAL_EXECUTE` 是三态开关：`1/true/yes/on` = 强制开，
+  `0/false/no/off` = 强制关，未设 = 按上表 scope 默认。
+- sdk_runtime 默认不注册的原因：SDK 嵌入的宿主环境不可知（可能与你的业务进程同机同权限），
+  opt-in 后终端能力的安全责任归开发者业务侧。
+- headless 默认开的前提是容器隔离承担确定性防线（单租户、非 root、网络策略收紧），
+  部署 checklist 见 [`headless-deployment.md`](./headless-deployment.md) §7。
+
+### 13.3 行为契约（逐条，以实际实现为准）
+
+**审批语义**：`terminal_execute` 声明了 `requires_user_approval` trait —— 它是全工具面里
+少数**可能挂起等待用户确认**的工具。桌面开启打断式确认时，等待上限 60 秒，超时即封卡
+返回结构化失败（"确认等待超时，用户未响应"）；headless / 无人值守且无确认 UI 时不会
+傻等，直接快速失败并给出可操作的错误。给无人值守场景排任务时应把这个 trait 计入
+时间预算（或确认部署形态是免确认的）。
+
+**解释器**：按平台探测并缓存 —— Windows `pwsh > powershell > cmd`，POSIX `bash > sh`；
+返回体带 `shell` 字段告诉 LLM 实际用的解释器（消除"Windows = cmd 语法"的错误预设）。
+覆盖口：env `KROW_TERMINAL_SHELL`（`pwsh|powershell|cmd|bash|sh|auto`，默认 `auto`）。
+
+**超时**：前台默认 30s，上限 300s。**前台超时不再直接杀进程**：仍在跑的进程自动降级为
+后台作业，返回 `job_id` + 已捕获输出（回执带 `timed_out: true`），LLM 可用
+`terminal_poll` 续等；强制回收只发生在后台也超 1800s 之后。更长的任务应一开始就用
+`mode="background"`（见下）。
+
+**输出窗口与落盘**：单次捕获上限 512K 字符；回执窗口 stdout 8000 字符（头 3/4 + 尾 1/4，
+保留首尾注意力位）、stderr 2000 字符。超窗时**脱敏后的全文**写入项目内
+`.krow/terminal/term_<时间戳>_<序号>.log`，回执带 `output_file` 字段指路，agent 可用
+文件工具续读。落盘目录有自动保留策略：日志 7 天过期、目录 100MB 体量削旧、
+命令台账（`ledger.jsonl`）10MB 轮转保尾。
+
+**失败是数据，不是异常**（`structured_failure_passthrough`）：命令**跑完了但退出非零**
+不抛异常 —— 返回结构化 dict（`success=False` + stdout / stderr / `return_code` 全量送达），
+LLM 据此调试脚本。只有**工具本身没跑起来**（调用失败）才走异常通道。环境类失败
+（`ModuleNotFoundError` / `command not found` / 权限拒绝）带结构化标注，便于换路重试
+而不是原地重试。
+
+**熔断黑名单与执行 profile**：宿主毁伤类命令（fork bomb、`mkfs`、`dd if=`、`rm -rf /`、
+格式化盘等）在任何环境都拒绝。环境依赖类条目按 profile 分流：`desktop` 下 `sudo` /
+`ssh` / `curl | sh` / `chmod 777` 等拒绝并点名"由部署 profile 决定"；`container` 下放行
+（非 root 容器内无宿主危害，出网由网络策略管）。覆盖口：env `KROW_TERMINAL_PROFILE`。
+
+**凭据防泄**：子进程环境自动剔除键名命中凭据族（`*_API_KEY` / `*_SECRET*` / `*TOKEN*` /
+`*PASSWORD*` / `*CREDENTIAL*` / `*PRIVATE_KEY*` 等）的变量；回执、披露事件与落盘文件
+统一走同一套脱敏。
+
+**披露与审计**：每条自动执行的命令发布 `terminal.auto_executed` 事件（命令 + 输出尾窗，
+已脱敏）。桌面上渲染为可展开的披露卡片，并有历史命令查看入口；headless / SDK 侧经
+SSE 透出为 `agent.terminal.executed` / `agent.terminal.jobs_aborted`，同时命令台账落
+`.krow/terminal/ledger.jsonl` 供事后审计。
+
+**后台作业**：`terminal_execute(mode="background")` 立即返回 `job_id` + 输出文件路径，
+输出流式写 `.krow/terminal/job_<id>.log`；`terminal_poll(job_id, wait_s, wait_pattern)`
+查状态 / 增量输出 / 退出码，`wait_s` 单次上限 60s，`wait_pattern`（regex）命中已知日志行
+即提前返回。作业生命周期从属于任务：项目切换 / 任务结束时统一回收，结束前 conclude
+守门会拒绝"命令还在跑就报完成"。作业注册表落盘（`.krow/terminal/jobs.json`），
+进程重启后旧 `job_id` 仍可查到终态诊断。
+
+### 13.4 给 plugin 作者的接入面
+
+- 工具名就叫 `terminal_execute` / `terminal_poll`（规划、日志、复盘三处同名）；
+  自定义 ACT 想引导终端习惯（如"参数复杂就落脚本再执行"）在自己的 ACT 引导层写，
+  不需要也不应该改工具注册。
+- 需要终端的 SDK 场景：先确认 scope 默认（§13.2），嵌入式默认关，opt-in 是显式动作。
+- 观察它干了什么：订阅 `agent.terminal.executed`（SSE / EventBusReader），或读项目内
+  `.krow/terminal/ledger.jsonl`。
+
+### 13.5 与专用工具的边界（什么时候必须走专用工具）
+
+**判定口诀：shell 可以跑脚本、算读数、做确定性操作；但质量闸门相关的判定必须出自
+持有台账的专用工具 —— 终端自算的读数不核销闸门。**
+
+- **有专用工具的操作走专用工具**：文档编辑、PPT 渲染、知识检索、领域校验等有专用工具的
+  任务族，terminal 只是兜底。这不只是习惯：专用工具背后连着质量闸门与验收判据，
+  shell 顶岗会把整条质量链路绕开。
+- **领域质量闸门按能力路由武装（System 1 判定，LLM 不可绕）**：以文献写作类领域包为例，
+  引用完整性闸门的武装条件是"任务被路由到写作能力"这一系统侧事实，而不是"agent 调过
+  领域工具"。所以即便 agent 全程用 shell 完成写作、并用自己手搓的脚本"完成了校验"，
+  conclude 时闸门仍会 BLOCK，要求补调领域校验工具。原因是结构性的：反幻觉审计
+  （如"参考文献 ↔ 真实检索记录"对账）需要外部对照台账，而台账只有领域工具读得到 ——
+  用自己写的尺量自己写的文，在这个维度上做不到。
+- **防伪有硬闸**：用 shell 绕专用工具伪造保真信号（如改产物 mtime 冒充"已重新渲染"）
+  会被执行器防伪闸拦截；验收卡（expected card）可以把某任务族的 `terminal_execute`
+  用量硬钉为 0。
+- **确定性子任务可以合法用 shell**：统计行数、批量重命名、跑测试、确定性绘图脚本等
+  没有专用工具对应、也不核销任何闸门的活儿，terminal 正是为它们准备的。
 
 ---
 

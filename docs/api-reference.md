@@ -3659,6 +3659,9 @@ finally:
 | `KROW_LLM_REPLAY_MODE` | `replay` | LLMReplayStore.from_env 默认模式：`record` / `replay` / `auto` |
 | `KROW_SDK_TELEMETRY_ENABLED` | `0` | 是否反向上报 telemetry |
 | `KROW_HEADLESS` | `0` | 主仓 headless 模式（影响内置 Visual Adapter 选择） |
+| `KROW_SDK_TERMINAL_EXECUTE` | 按 scope | `terminal_execute` 三态开关：`1` 强制开 / `0` 强制关 / 未设 = scope 默认（headless 开、SDK 嵌入关）。行为契约详 [`advanced-development-guide.md`](./advanced-development-guide.md) §13 |
+| `KROW_TERMINAL_SHELL` | `auto` | 终端解释器覆盖（`pwsh\|powershell\|cmd\|bash\|sh\|auto`；默认按平台探测，Windows `pwsh > powershell > cmd`，POSIX `bash > sh`） |
+| `KROW_TERMINAL_PROFILE` | 按 scope | 终端执行 profile 覆盖（`desktop\|container`，决定环境依赖类黑名单条目是否放行；headless 默认 `container`） |
 
 #### 双环元认知 / 运行时自进化 kill switch（默认全 **ON**）
 

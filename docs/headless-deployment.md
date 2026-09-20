@@ -103,6 +103,7 @@ docker run --rm -e KROW_API_KEY=sk-user-xxxxx my-krow-agent:0.1
 | `KROW_DATA_DIR` | **SDK 自动读** (`modules/utils/portable_path.py` 0.8.12.15+) | 推荐 | 显式指定可写数据目录；**不设**时按 XDG / `~/Library/Application Support` / `%APPDATA%` 回退。**设了但不可写 → 启动期 fail-loud，不静默换目录**（见 [Q11](#q11-启动即崩无法建立可写目录--krow_data_dir)） |
 | `KROW_BASE_URL` | **应用层读** → 显式传 `AgentBuilder.with_base_url(...)` | 可选 | 自定义 Cloud endpoint（staging / 私有化部署） |
 | `PYTHONUNBUFFERED=1` | Python runtime | 推荐 | 容器内日志即时输出 |
+| `KROW_SDK_TERMINAL_EXECUTE` | **SDK 自动读** | 可选 | 终端执行工具三态开关：headless 场景**默认开**（免确认 + `container` profile）；多租户 / 网络未收紧时设 `0` 关闭（详 §5.4） |
 
 > ⚠️ **注意区分**：`KROW_API_KEY` / `KROW_BASE_URL` 是 **cookbook convention**，**SDK 不会自动读** —— 你的入口代码需要 `os.environ.get(...)` 后显式传给 `AgentBuilder`。**只有** `KROW_DATA_DIR` 是 SDK 直接消费的。完整 SSOT 参 `modules/utils/portable_path.py:ENV_KROW_DATA_DIR`。
 
@@ -337,6 +338,24 @@ SDK 0.8.12.15+ 通过 PSA `restricted`：
 - ✅ 不需要 host network / host PID / host IPC
 - ✅ 不需要 `allowPrivilegeEscalation`
 
+### 5.4 容器内终端执行（`terminal_execute`）：默认开启，行为与桌面不同
+
+适用于本文全部容器形态（A / B / C 与官方 headless 镜像）。完整行为契约见
+[`advanced-development-guide.md`](./advanced-development-guide.md) §13，这里只列容器侧差异：
+
+| 维度 | headless 容器内行为 | 桌面对照 |
+|---|---|---|
+| 注册默认 | **默认注册**（`KROW_SDK_TERMINAL_EXECUTE=0` 显式关闭） | 始终注册 |
+| 用户确认 | **免确认**（无确认观众；不会挂起等审批） | 跟设置页"执行前先问我" |
+| 执行 profile | `container`：`sudo` / `ssh` / `curl \| sh` / `chmod 777` 等环境依赖类条目**放行**（非 root 容器内无宿主危害，出网由 NetworkPolicy 管）；宿主毁伤类（fork bomb / `mkfs` / `dd if=` / `rm -rf /` 等）仍然**永不放行** | `desktop`：环境依赖类也拒绝 |
+| 审计 | 每条命令发 `terminal.auto_executed` 事件（脱敏），SSE 透出为 `agent.terminal.executed`；命令台账 + 全量输出落 `<project_root>/.krow/terminal/`（日志 7 天过期 + 100MB 体量自动削旧） | 同左 + UI 披露卡片 |
+
+- **默认开的前提是容器隔离承担确定性防线**：单租户、非 root（`USER 1000`）、NetworkPolicy
+  收紧 egress（见 §7 checklist）。多租户共享容器 / 未收紧网络的部署，请设
+  `KROW_SDK_TERMINAL_EXECUTE=0` 关闭，或 `KROW_TERMINAL_PROFILE=desktop` 收紧黑名单。
+- 无人值守任务不会因为审批挂起：容器内免确认；即便某条命令跑超前台上限（300s），
+  进程会自动降级为后台作业继续跑（`terminal_poll` 可续查），不会白等。
+
 ---
 
 ## 6. 常见故障排查
@@ -550,6 +569,8 @@ kubectl run perm-probe --rm -it --image=<your-image> --overrides='{...你的 sec
 - [ ] 镜像 trivy / snyk / grype 扫描通过
 - [ ] log 不打印完整 API key —— SDK 日志已自动 redact，但你的应用层日志也要
 - [ ] 容器 `terminationGracePeriodSeconds >= 300` 给 LLM 任务收尾
+- [ ] 终端执行（`terminal_execute`）默认开启已知悉：单租户 + 非 root + NetworkPolicy 三前提
+      任一不满足 → 设 `KROW_SDK_TERMINAL_EXECUTE=0`（详 §5.4）
 
 ---
 
