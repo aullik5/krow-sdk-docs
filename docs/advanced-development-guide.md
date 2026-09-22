@@ -616,6 +616,11 @@ hint_files:
   extended: extended.md     # 可选；只在 LLM 主动 call when_extended_needed 时才加载
 require_acts: []              # 可选；本 ACT 依赖的其他 ACT
 exclude_acts: []              # 可选；与本 ACT 互斥的 ACT
+deliverable_quality_checks: []  # 可选；opt-in 的 System-1 交付结构质检项（标题唯一性 /
+                                # 序号连续 / 层级一致 / 交付声明锚点，取值域见
+                                # doc_structure_check.KNOWN_CHECKS）。注意：用户量化承诺
+                                # 清点（goal_quantity_check）是任务级、无条件生效的，
+                                # 不依赖本字段声明。
 ```
 
 ### 4.4 写 `intent_description` 的黄金法则
