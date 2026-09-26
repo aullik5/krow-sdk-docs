@@ -2821,12 +2821,12 @@ result = leader.run("产出一份市场调研简报，拆解后逐个派给团�
 |---|---|---|---|---|
 | 桌面 GUI | 注册 | 跟用户设置（默认不打断，事后披露卡片） | `desktop` | 设置页"执行前先问我" |
 | headless（容器服务） | **注册**，免确认 | 无（事件落盘审计代替确认观众） | `container` | `KROW_SDK_TERMINAL_EXECUTE=0` 显式关闭 |
-| sdk_runtime（外部开发者嵌入） | **不注册** | opt-in 后免确认 | `desktop`（保守） | `KROW_SDK_TERMINAL_EXECUTE=1` 或 feature_flags.json `sdk_terminal_execute_enabled=true` |
+| sdk_runtime（外部开发者嵌入） | **注册**，免确认 | 无（无确认观众） | `desktop`（保守） | `KROW_SDK_TERMINAL_EXECUTE=0` 或 feature_flags.json `sdk_terminal_execute_enabled=false` 显式关闭 |
 
 - env `KROW_SDK_TERMINAL_EXECUTE` 是三态开关：`1/true/yes/on` = 强制开，
   `0/false/no/off` = 强制关，未设 = 按上表 scope 默认。
-- sdk_runtime 默认不注册的原因：SDK 嵌入的宿主环境不可知（可能与你的业务进程同机同权限），
-  opt-in 后终端能力的安全责任归开发者业务侧。
+- sdk_runtime 自 2026-09-26 起默认注册：terminal coding 是 agent 的核心能力。执行 profile
+  仍取 `desktop` 保守黑名单；宿主与业务进程同机同权限、不希望 agent 执行命令时，用上表关闭口关掉。
 - headless 默认开的前提是容器隔离承担确定性防线（单租户、非 root、网络策略收紧），
   部署 checklist 见 [`headless-deployment.md`](./headless-deployment.md) §7。
 
