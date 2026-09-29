@@ -26,8 +26,15 @@
 
 exit_code: 0
 # Walltime SSOT (P2-A · 2026-05-25 · lessons 2026-05-25 §教训5)
-max_walltime_s_serial: 800
-max_walltime_s_parallel: 1200
+# 2026-09-29 重标定（krow#3187 · 独立 PR 记录依据）：
+# 旧值按 2026-05 时代模型在 --budget-walltime target 内收口的经验标定；
+# deepseek-v4-pro 时代 sdk-nightly 自 08-14 起 45 天连红，近 6 晚实测（删失样本，
+# 只有超阈晚有读数）已常态落在 target 之外、grace 段收口——而这在 agent 预算链
+# 上完全合法（max=2×target + 在飞逻辑调用抢占粒度 903s，见 tests/sdk/_budget_window.py）。
+# 新 serial = 近 6 晚观测 max 上浮 ~5-15%% 圆整；parallel = min(serial×1.5, attempt 窗-50)
+# ——attempt 窗 = window_for_agent_ceiling(budget)，超过它的阈值永远打不到（先被 SIGKILL）。
+max_walltime_s_serial: 1600
+max_walltime_s_parallel: 1700
 
 required_artifacts:
   - risk_report.md

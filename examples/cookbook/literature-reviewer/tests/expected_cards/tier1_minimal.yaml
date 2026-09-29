@@ -38,8 +38,15 @@ exit_code: 0
 # 开发者 zzp 2026-05-25 真跑 846s 超 800s 失败案例直接驱动. parallel 跑时
 # CPU/网络/LLM TPM 争抢必然偶发超阈, 不应作 System 1 硬闸断言 (违反 §0.0
 # 速度是第 3 优先级). assert_journey 自动检测 PYTEST_XDIST_WORKER + 3 套 env SSOT.
-max_walltime_s_serial: 800
-max_walltime_s_parallel: 1200
+# 2026-09-29 重标定（krow#3187 · 独立 PR 记录依据）：
+# 旧值按 2026-05 时代模型在 --budget-walltime target 内收口的经验标定；
+# deepseek-v4-pro 时代 sdk-nightly 自 08-14 起 45 天连红，近 6 晚实测（删失样本，
+# 只有超阈晚有读数）已常态落在 target 之外、grace 段收口——而这在 agent 预算链
+# 上完全合法（max=2×target + 在飞逻辑调用抢占粒度 903s，见 tests/sdk/_budget_window.py）。
+# 新 serial = 近 6 晚观测 max 上浮 ~5-15%% 圆整；parallel = min(serial×1.5, attempt 窗-50)
+# ——attempt 窗 = window_for_agent_ceiling(budget)，超过它的阈值永远打不到（先被 SIGKILL）。
+max_walltime_s_serial: 1750
+max_walltime_s_parallel: 1850
 
 required_artifacts:
   - literature_review.md
