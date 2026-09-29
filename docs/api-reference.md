@@ -1130,6 +1130,7 @@ def run_stream(
 |---|---|
 | Macro ReACT | `macro_react.plan_created` / `macro_react.todo_updated` |
 | 进度 | `progressive.step_start` / `progressive.step_completed` / `progressive.replan_start` / `progressive.early_conclude` |
+| 资源 | `progressive.memory_pressure`（内存水位越线：`level`=warn/critical · `used_bytes` / `limit_bytes` / `ratio` / `source` / `relief`）/ `progressive.llm_quota_extended`（LLM 配额按需续额：`old_max_llm_calls` / `new_max_llm_calls` / `successful_steps`） |
 | Planner | `planner.phase2_start` / `planner.phase2_end` |
 | Micro ReACT | `react.step` / `react.complete` / `react.thinking_stream` |
 | LLM | `llm.request` / `llm.response` / `llm.error` |
