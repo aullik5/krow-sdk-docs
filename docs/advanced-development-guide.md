@@ -1298,10 +1298,13 @@ class PIIDetectorGate:
                     reason="allow_pii=True 已显式放行",
                     gate_name="pii_detector",
                 )
+            # 真键是 ``tool`` / ``output``（契约表见 concepts/04-conclude-guard.md）；
+            # ``tool_name`` / ``result`` 是早年文档示例的写法，宿主从未注入过。
             for tr in context.get("recent_tool_results", []):
-                if tr.get("tool_name") != "data_analyst_read_csv":
+                if tr.get("tool") != "data_analyst_read_csv":
                     continue
-                cols = tr.get("result", {}).get("columns", []) or []
+                out = tr.get("output")
+                cols = (out.get("columns") if isinstance(out, dict) else None) or []
                 hits = [c for c in cols
                         if any(kw in str(c).lower() for kw in _PII_KEYWORDS)]
                 if hits:
