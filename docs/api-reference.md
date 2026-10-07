@@ -2998,7 +2998,7 @@ Krow 的 macro 编排是元认知**决策脑**（GWT 全局工作站）：所有
 | `register_situation_contributor(target)` | `(type\|callable\|str) -> str` | **观测层**：登记 SituationContributor（`applicable()`+`__call__()->{"error_vector","signals"}`） |
 | `register_wake_trigger(target)` | `(callable\|str) -> str` | **唤醒层**：登记 WakeTrigger（`(prev,curr,delta,ledger)->str\|None`） |
 | `register_decision_classifier(target)` | `(callable\|str) -> str` | **结算层**：登记 DecisionClassifier（`(action,snap,ledger)->str\|None`） |
-| `register_control_reflex(name, *, on, actuator, max_fires=1, note="")` | `(...) -> str` | **控制层**：登记控制反射（`(executor)->bool`），在 LLM 被问**之前**确定性动手 |
+| `register_control_reflex(name, *, on, actuator, max_fires=1, effect="", note="")` | `(...) -> str` | **控制层**：登记控制反射（`(executor)->bool`），在 LLM 被问**之前**确定性动手 |
 | `get_registry_snapshot()` | `() -> dict` | 只读：三注册表 + `control_reflexes` 已登记内容 + `axes` + `magnitude_clamped` + 计数（debug"我的 contributor 注册上了吗 / 登记上了为什么没起作用"） |
 
 **快照字段**（`get_registry_snapshot()`，0.9.1.13 起含后两格）：
@@ -3246,6 +3246,8 @@ register_step_actuator("my_pkg.actuators:TranslationGapActuator")
 | `AUTHORITY_ARTIFACT` | `A2` | 动产物（**必须**声明 `compile_input`：产物是否进知识编译输入） |
 | `AUTHORITY_PLAN` | `A3` | 动计划（多数 step 执行器在这一级） |
 | `AUTHORITY_META` | `A4` | 动元级 |
+
+**结构效应 `effect`**（决策收口 2026-10-07：「不能落到五种结构效应之一的不是决策」）：每条契约最终都要落到 `plan` / `parameter` / `routing` / `artifact` / `stop` 之一（`STRUCTURAL_EFFECTS`）。`register_reflex_decision(..., effect="")` 与 `register_control_reflex(..., effect="")` 留空即按权威推导（A0→`parameter` / A1→`routing` / A2→`artifact` / A3→`plan`；A4 推不出，必须显式填），填了表外值或推不出 → **注册期即拒**。只有执行器的真实效应与权威默认不一致时才显式写（例：A3 权威却只是掐一个阈值 → `effect="parameter"`）。「只报不动手」的条目不再是决策：改用 `register_wake_trigger` 登记为观测。
 
 **三条铁律**（由机制层物理守住，不是提示）：
 
