@@ -1129,7 +1129,8 @@ def run_stream(
 | 类别 | topic |
 |---|---|
 | Macro ReACT | `macro_react.plan_created` / `macro_react.todo_updated` |
-| 进度 | `progressive.step_start` / `progressive.step_completed` / `progressive.replan_start` / `progressive.early_conclude` |
+| 进度 | `progressive.step_start`（含 `phase` / `phase_index` / `phase_total` / `sub_goal_id`）/ `progressive.step_completed` / `progressive.replan_start` / `progressive.early_conclude` |
+| 程末验证 | `progressive.phase_end_verdict`（程 = 规划器 sub_goal：`phase` / `phase_index` / `phase_total` / `ok` / `source`=system1\|system2\|quota_overrun / `summary`（零 LLM 成品一句话）/ `reason` / `sub_goal_id` / `act_phase` / `artifacts` / `spend_ratio` / `pending_steps` / `stood_down`） |
 | 资源 | `progressive.memory_pressure`（内存水位越线：`level`=warn/critical · `used_bytes` / `limit_bytes` / `ratio` / `source` / `relief`）/ `progressive.llm_quota_extended`（LLM 配额按需续额：`old_max_llm_calls` / `new_max_llm_calls` / `successful_steps`） |
 | Planner | `planner.phase2_start` / `planner.phase2_end` |
 | Micro ReACT | `react.step` / `react.complete` / `react.thinking_stream` |
