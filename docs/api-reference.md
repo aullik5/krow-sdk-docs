@@ -36,6 +36,7 @@
   - [§3.6 执行剖面（execution profile）](#36-执行剖面execution-profile)
   - [§3.7 `contract_actions` — 让 ACT 声明可直接调用的宏动作](#37-contract_actions--让-act-声明可直接调用的宏动作)
   - [§3.8 `landing_actions` — 声明"调了它才算交付"](#38-landing_actions--声明调了它才算交付)
+  - [§3.9 `delivery_mode` — 声明"交付物就是对话回复"](#39-delivery_mode--声明交付物就是对话回复)
 - [§4. 配置 dataclass](#4-配置-dataclass)
   - [§4.1 `BudgetSpec`](#41-budgetspec)
   - [§4.2 `BuilderConfig`](#42-builderconfig)
@@ -1525,6 +1526,26 @@ landing_actions:
 **约束**：`landing_actions ⊆ contract_actions`——声明为着陆动作的工具必须同时可达，否则 macro 根本调不到它。这是**配置错误**，请在你的 plugin 测试里钉住（主仓由 CI lint 强制；运行期不再校验，因为那时唯一能做的只有静默降级，正是本字段要治的病）。单个字符串也接受（`landing_actions: worker.submit_verdict`）。
 
 主仓 SSOT：`modules/agent/progressive/contract_actions.py:declared_landing_actions`；yaml 字段归一在 `modules/agent/act/act_hierarchy.py:_coerce_landing_actions`。
+
+### §3.9 `delivery_mode` — 声明"交付物就是对话回复"（0.9.4.9+）
+
+**问题形状**：对话型 ACT（组长对话槽、客服问答）的交付物是**那条回复本身**——零字节落盘、也没有任何回调动作。引擎的结构失明传感器（"计划里没有任何着陆步"）会把这种计划每一拍都判成结构缺陷并上行决策脑 → replan，LLM 被反复要求给一个本来就不该有着陆步的计划补着陆步（真机：一次处理邮件 11 次 replan）。
+
+**为什么不用 §3.8 `landing_actions`**：它会加一道"计划必须含该步"的准入闸——纯问答计划会被拒 ≤N 次，是把误判换成另一种误判。对话型 ACT 需要的是一条**事实声明**，不是义务。
+
+```yaml
+# <your_act>/__act__.yaml
+delivery_mode: conversation     # 或 artifact（缺省语义，可不写）
+```
+
+| 取值 | 含义 | 对引擎的影响 |
+|---|---|---|
+| `artifact`（缺省） | 交付物落盘 / 经着陆动作交付 | 行为不变 |
+| `conversation` | 交付物即对话回复 | "计划无着陆步"记为健康态 `delivery_in_reply`，不上行、不触发 replan；计划里**真有**着陆步时仍按着陆步判 |
+
+非法取值按未声明处理并打 warning（写错字不能静默变成"永远不上行"）。
+
+主仓 SSOT：`modules/agent/progressive/contract_actions.py:declared_delivery_mode`；yaml 字段归一在 `modules/agent/act/act_hierarchy.py:_coerce_delivery_mode`；消费点 `modules/agent/progressive/executor.py:_shortfall_blindness`。
 
 ---
 
