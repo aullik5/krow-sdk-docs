@@ -466,7 +466,7 @@ agent = (
 
 | 入参 | 说明 |
 |---|---|
-| `directives` | 非空字符串；空 / 纯空白 → `ValueError`；超长 → `ValueError` |
+| `directives` | 非空字符串；空 / 纯空白 → `ValueError`；超软预算 `AgentBuilder.PERSONA_DIRECTIVES_BUDGET_CHARS`（20,000）→ 只 `WARNING`、不截断；超硬上限 `AgentBuilder.PERSONA_DIRECTIVES_MAX_CHARS`（64,000）→ `ValueError`。下游读类属性，不要镜像数字（详见进阶指南 §11.2「persona 预算与上限」） |
 
 #### `with_team_member(name: str, member: Agent | Callable[[str], dict], *, description: str = "") -> AgentBuilder` （B 层）
 

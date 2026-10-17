@@ -2665,7 +2665,7 @@ prompt 注入对 agent 的影响是**分等级**的——Krow 用 `PromptPriorit
 - `with_agent_identity("一句话角色")`：覆盖默认身份段。
 - `with_persona_directives("多段行为准则")`：注入到**安全红线之后的 `CRITICAL` 段**（primacy），并在 prompt **末尾**追加「冲突时以行为准则为准」提醒（recency）。当你的身份要求（如「只分配不执行」）与默认规则（如「必须有执行步骤」）冲突时，以你的准则为准。
 
-二者均 **fail-loud**：传空 / 纯空白 / 超长 → `ValueError`（显式声明却给非法值不静默吞掉）。不调用时行为与旧版**逐字节一致**（零回退）。
+二者均 **fail-loud**：传空 / 纯空白 → `ValueError`（显式声明却给非法值不静默吞掉）；`identity` 超 `AgentBuilder.AGENT_IDENTITY_MAX_CHARS`（4,000）→ `ValueError`；`directives` 的长度规则见下面「persona 预算与上限」。不调用时行为与旧版**逐字节一致**（零回退）。
 
 ```python
 researcher = (
@@ -2674,6 +2674,28 @@ researcher = (
     .build()
 )
 ```
+
+#### persona 预算与上限
+
+`with_persona_directives` 对长度分两档，数字都挂在 `AgentBuilder` 类属性上：
+
+| 类属性 | 值 | 超过时 |
+|---|---|---|
+| `AgentBuilder.PERSONA_DIRECTIVES_BUDGET_CHARS` | 20,000 字符 | **软预算**：只记一条 `WARNING`（`persona over budget: N chars > 20000; quality degrades — move process manuals out of persona`），内容原样保留、不截断、不拒收。越过这条线 attention 开始稀释、挤占工具 / 上下文 token 预算，质量下降但 agent 照常起来 |
+| `AgentBuilder.PERSONA_DIRECTIVES_MAX_CHARS` | 64,000 字符 | **硬上限**：`ValueError`（报错点名实际长度、软预算与硬上限）。这是留给真正误用的——把整份文档 / 整本流程手册贴进 persona |
+
+长度按 `len(directives.strip())` 计（Python 字符数，不是 token 数）。两个数字是**跨仓契约**：下游（teammate kit、宿主、CI 预检）**直接读这两个类属性**，不要在自己仓里抄一份 `20_000` / `64_000`——镜像的数字会漂移。
+
+```python
+from krow_agent_sdk import AgentBuilder
+
+persona = load_leader_persona()
+if len(persona.strip()) > AgentBuilder.PERSONA_DIRECTIVES_BUDGET_CHARS:
+    # CI 预检：超预算就提醒作者瘦身，而不是等到线上 WARNING 刷屏
+    warn(f"persona {len(persona)} 字 > 预算 {AgentBuilder.PERSONA_DIRECTIVES_BUDGET_CHARS}")
+```
+
+> 为什么是两档：2026-10-17 组长 persona 长到 20,809 字、撞上当时唯一的 20,000 硬闸，`AgentBuilder.build()` 抛 `ValueError` → `/readyz` 503 → 全体组长 pod 停摆约 2 小时——一个从未写进文档、也没导出的质量启发式，不该有把整个平台打下线的权力。
 
 ### 11.3 B 层：委派工具与组员寻址
 
