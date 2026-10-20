@@ -212,10 +212,21 @@ topics=(
     "planner.phase2_start", "planner.phase2_end",
     "react.step", "react.complete", "react.thinking_stream",
     "llm.request", "llm.response", "llm.error",
+    "llm.cost",  # 0.9.5.18 起默认出流：每次 LLM 调用一条，payload 含 cost_cp / priced（见下）
     "agent.task_start", "agent.task_complete",
     "agent.task_failed", "agent.task_cancelled",
 )
 ```
+
+> 以上是节选；完整默认清单（含 `klik.*` / `cognitive.*` / `progressive.*` 等）以
+> `inspect.signature(Agent.run_stream).parameters["topics"].default` 为准。
+
+`llm.cost`（0.9.5.18 起默认订阅）是**计费事实**：provider 每完成一次 LLM 调用发一条
+（非流式 / 流式末 chunk 各一笔，与 `llm.response` 同频），payload 为
+`model / cost_cp(int) / prompt_tokens / completion_tokens / duration_s / priced(bool)`，
+外加读得到才带的归因字段 `run_id / session_id / step_id / task_id / source_module`。
+`priced=False` 表示本地价格表没有该模型单价——此时 `cost_cp=0` 是「没算出来」不是「免费」。
+宿主按 `cost_cp` 累加即得本次 run 的 CP 消耗；0.9.5.17 及更早版本需自行 `topics=` 补订阅。
 
 可用 `topics=` 自定义，**但必须包含 `agent.task_complete` / `agent.task_failed` / `agent.task_cancelled` 至少 1 个终止 topic**（SDK fail-loud 校验，否则 `ValueError`）；用户提前 `break` for loop 时 SDK 自动清理 subscribe + 信号 stop_event 让 agent 协作 stop（详 `Agent.run_stream()` docstring）。
 
