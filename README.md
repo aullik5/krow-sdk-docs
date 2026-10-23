@@ -11,10 +11,12 @@
 |---|---|
 | `pip install krow-agent-sdk` | ✅ [PyPI 0.9.5.27 已发布](https://pypi.org/project/krow-agent-sdk/) |
 | 写 plugin + 用 `LLMReplayStore` record/replay 跑单元测试 | ✅ 完整可用 |
-| `agent.run()` 端到端真实跑 agent | ✅ `pip install krow-sdk-install && krow-sdk-install --api-key $KROW_API_KEY` 装 runtime 后即可（详 [`runtime-install.md`](./docs/runtime-install.md)） |
+| `agent.run()` 端到端真实跑 agent | 🚧 需先装私有 runtime：`pip install krow-sdk-install && krow-sdk-install --api-key $KROW_API_KEY`（详 [`runtime-install.md`](./docs/runtime-install.md)）。**与 SDK 0.9.5.27 同版的 runtime 尚未发布到 TOS**，见表下「runtime 版本对齐提示」 |
 | **运行模式** | ✅ 0.9.5 起默认 **klik**（一条对话、一个决策者；模型用 shell + `krow <子命令>` 组合能力）。turbo 仅作回退模式、平台计划退役（治理决定，非代码现状），本仓文档不再提供 turbo 用法（详 [`quickstart.md`](./docs/quickstart.md) §0.1） |
 | Krowwork 市场插件包（`plugin.json`）开发规范 | ✅ 已公开（详 [`plugin-marketplace-guide.md`](./docs/plugin-marketplace-guide.md)）；**生产提交 / 审核 / 分发安装三段：规划 / 实验·以平台公告为准** |
 | EULA 法律生效 | 🚧 v1.1 DRAFT (good-faith disclosure)；等持证律师签字（详 [`EULA.md`](./docs/EULA.md) §0） |
+
+> **runtime 版本对齐提示（2026-10-23）**：SDK 与 runtime 同出一份版本号，应完全一致。本 README 更新时 runtime `0.9.5.27` 构建仍在进行、尚未上 TOS，TOS 上最新已发布的 runtime 是 **`0.9.5.26`**。PyPI 当前的 `krow-sdk-install`（0.8.12.12）不带版本参数、总是装 TOS 最新已发布的 runtime——`pip install -U krow-agent-sdk` 后直接装会得到 0.9.5.27 + 0.9.5.26 的错版组合；要同版配对请 `pip install krow-agent-sdk==0.9.5.26` 再装 runtime，或等 runtime 0.9.5.27 上 TOS 后 `pip install -U krow-agent-sdk` 并重新运行 `krow-sdk-install`（已装旧版 runtime 时先 `pip uninstall krow-agent-sdk-runtime`）——届时本提示即失效。`krow-sdk-install` 新版（PyPI 尚未发布）默认对齐已装 SDK 版本，TOS 缺该版 runtime 时报 `VersionNotFoundError`、不回退，需 `--version <已发布版本>` 或 `--latest`（详 [`runtime-install.md`](./docs/runtime-install.md) §2.1–2.2）。
 
 ---
 
@@ -22,7 +24,7 @@
 
 | 名字 | 是什么 | 在哪读 |
 |---|---|---|
-| **SDK Plugin Protocol** | 10 类 Python 协议类（ACT / Tool / Hint / Gate / EventListener / Observability / MCPServer / Security / DomainPack / VisualAdapter），通过 `AgentBuilder.with_*_plugin(...)` 装进**你自己宿主的 agent** | `quickstart.md` / `api-reference.md` §5 / `advanced-development-guide.md` / `examples/cookbook/` |
+| **SDK Plugin Protocol** | `api-reference.md` §5 的 Python 协议类（ACT / Tool / Hint / Gate / EventListener / Observability / MCPServer / Security / DomainPack / VisualAdapter / DocumentParser），通过 `AgentBuilder.with_*_plugin(...)` 装进**你自己宿主的 agent** | `quickstart.md` / `api-reference.md` §5 / `advanced-development-guide.md` / `examples/cookbook/` |
 | **Krowwork 市场插件包（`plugin.json`）** | 打成 `tar.gz` 上架到 Krowwork 插件市场、由主人装给**平台组员**的能力包（技能 `SKILL.md` + 纯 Python 工具包 + `mcp.json` 连接） | `plugin-marketplace-guide.md` |
 
 两者不是同一套协议，不能互相替代。
