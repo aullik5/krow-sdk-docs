@@ -17,8 +17,13 @@
 | 5 | **knowledge-wiki** | [`knowledge-wiki/`](./knowledge-wiki/) | 一批资料 → 结构化知识库（本体 Ontology + 可浏览互链百科词条 wiki） | ⭐⭐⭐⭐ | ToolPlugin × 5（扫描 / 抽取 / 关系 / 物化 / 覆盖核对）· ACTPlugin · GatePlugin（WikiCoverageGate 防"假编译"）· EventListenerPlugin（三阶段进度）+ BudgetSpec |
 | 6 | **hitl-assistant** | [`hitl-assistant/`](./hitl-assistant/) | CAD/仿真参数变更助手（Agent 中途停下来问工程师 → 答复可带截图 → 断点续跑） | ⭐⭐ | **HITL 全 API**（`with_hitl` 强制确认门 / `request_human_input` LLM 自主发问 / `agent.resume` 多模态续跑 / durable checkpoint 跨进程恢复 / 断点管理；需 `krow-agent-sdk >= 0.9.0.5`）· ToolPlugin · ACTPlugin |
 | 7 | **datasheet-batch** | [`datasheet-batch/`](./datasheet-batch/) | 批量并发解析一批元器件 datasheet（建库）→ per-item 结构化规格 + 覆盖报告 | ⭐⭐ | **生产 agent 认知回路内并发批处理**：per-item 身份归属 / 单份失败隔离 / 覆盖可判定（N 中完成 M / 失败 K）/ 大批量分块续跑 · ToolPlugin（parse_one / batch_parse）· 覆盖守门 GatePlugin · ACTPlugin · 零 LLM 确定性演示（`python main.py --demo`；需 `krow-agent-sdk >= 0.9.0.51`）|
+| 8 | **k12-math** | [`k12-math/`](./k12-math/) | K12 数学教材/讲义 → 教育知识图谱（知识点/定理/公式 + 学习路径骨架）+ 学习路径 DAG 校验 | ⭐⭐ | **声明式领域包**（`with_domain_pack("k12_math")` 激活内置 K12 包 · `with_domain_pack_manifest(...)` 校本/题库二次开发）· System 1 学习路径环检测 · GateK12LearningPath |
+| 9 | **reasoning-analyst** | [`reasoning-analyst/`](./reasoning-analyst/) | 一份资料 + 一个问题 → 推理洞察管线（链式证据核验 / 竞争假设排除）→ 带证据落点的结论 | ⭐⭐ | **纯 SDK 启动 reasoning 管线**（`task_context source=reasoning_panel` + pin `act_name=reasoning_pipeline`）· EventBus 采集 cognitive.load / 结论事件 · `success` vs `final_output` 判定经验 · `diagnostics.get_overlay_snapshot` 查慢环蒸馏 |
+| 10 | **target-nominator** | [`target-nominator/`](./target-nominator/) | AI 靶点提名（HPA / Open Targets 取数 → 多维打分 → 反幻觉 gate） | ⭐⭐⭐ | ToolPlugin（取数 / 打分）· ACTPlugin · GatePlugin（反幻觉接地）· 多维加权提名 |
+| 11 | **litsci-metacog** | [`litsci-metacog/`](./litsci-metacog/) | 把"文献检索下载完整度"信号接进决策脑（观测层 contributor + 唤醒层 wake trigger + "注册≠激活"单测闭环） | ⭐ | **元认知三注册表**：`SituationContributor` 观测层 + wake trigger 唤醒层 + 决策脑 registry 注册；纯 System-1 零 LLM demo（无 plugin 类，`register()` 直接接线） |
+| 12 | **skill-loader** | [`skill-loader/`](./skill-loader/) | 不写 Python：用外部 `SKILL.md` 目录扩展 agent | ⭐ | `AgentBuilder.with_skill_directory(path)` / `get_skill_reports()`（`SKILL.md` → ACT 装载链） |
 
-> 前 6 个 cookbook 共演示 SDK 全部 6 类 production plugin（ACTPlugin / ToolPlugin / HintPlugin / GatePlugin / EventListenerPlugin / ObservabilityPlugin）+ BudgetSpec 预算硬约束。knowledge-wiki 额外演示 **System 1 确定性流水线编排 + System 2 单发 LLM**：知识编译走"扫描 → 逐文件抽取 → 关系推断 → wiki 物化 → 覆盖验收"五步确定性流程，而非易空转的巨型 macro-ReACT。第 7 个 **datasheet-batch** 演示**生产 agent 认知回路内的并发批处理**——把「批量解析一批 datasheet」交给 agent，同时保证并行吞吐 / per-item 身份归属（A 的规格绝不串到 B）/ 单份失败隔离 / 覆盖可判定 / 大批量续跑；支持 `python main.py --demo` 零 LLM 确定性演示。
+> 前 6 个 cookbook 共演示 SDK 全部 6 类 production plugin（ACTPlugin / ToolPlugin / HintPlugin / GatePlugin / EventListenerPlugin / ObservabilityPlugin）+ BudgetSpec 预算硬约束。knowledge-wiki 额外演示 **System 1 确定性流水线编排 + System 2 单发 LLM**（klik 继承原则：语义交模型、语法交系统）：知识编译走"扫描 → 逐文件抽取 → 关系推断 → wiki 物化 → 覆盖验收"五步确定性流程，而非易空转的巨型 macro-ReACT。第 7 个 **datasheet-batch** 演示**生产 agent 认知回路内的并发批处理**——把「批量解析一批 datasheet」交给 agent，同时保证并行吞吐 / per-item 身份归属（A 的规格绝不串到 B）/ 单份失败隔离 / 覆盖可判定 / 大批量续跑；支持 `python main.py --demo` 零 LLM 确定性演示。
 
 ---
 
@@ -84,10 +89,32 @@ pytest tests/test_*_smoke.py -v
 
 | 文档 | 你看哪个 |
 |---|---|
-| [`quickstart.md`](../quickstart.md) | **第一次接触 SDK** — 5 分钟跑通 hello world |
-| [`advanced-development-guide.md`](../advanced-development-guide.md) | **写自己 plugin 时回查** — 实战最佳实践 |
-| [`api-reference.md`](../api-reference.md) | **查具体 API signature** |
+| [`quickstart.md`](../../docs/quickstart.md) | **第一次接触 SDK** — 5 分钟跑通 hello world |
+| [`advanced-development-guide.md`](../../docs/advanced-development-guide.md) | **写自己 plugin 时回查** — 实战最佳实践（§1.10 = klik 下 plugin 的四种形态） |
+| [`api-reference.md`](../../docs/api-reference.md) | **查具体 API signature**（§2.4.4 = 运行模式） |
+| [`plugin-marketplace-guide.md`](../../docs/plugin-marketplace-guide.md) | **要上架 Krowwork 插件市场** — 市场插件包（`plugin.json`）与本目录的 SDK Plugin Protocol 是两套东西 |
 | **本目录 cookbook** | **想要 MVP 起手** — 直接 fork 改的真实业务 demo |
+
+---
+
+## klik 下 plugin 怎么被模型用到（SDK ≥ 0.9.5 默认运行模式）
+
+SDK ≥ 0.9.5 默认 `agent.run_mode = "klik"`（一条对话、一个决策者；执行主轴是 shell 与文件系统）。cookbook 的 plugin **不用改一行**就在 klik 下跑；
+写 README / ACT 文案时按下表措辞，别写"请先调用 X 工具"这类旧式调度口吻（模型自己用 shell 发现与调用）：
+
+| 你写的东西 | klik 下模型怎么用 |
+|---|---|
+| `ToolPlugin.get_tools()` 里的确定性工具（如 `contract.extract_clauses`） | bash：`krow tool run contract.extract_clauses --arg-file document_text=合同.txt`；骨架「角色工具」段只列名字，`krow tool help` 看参数（所以 `input_schema` 每个字段都要有 `description`） |
+| `ACTPlugin`（`act_assets/*.md` 方法论） | 只读投影：`krow skill show act:<name>`；骨架一行指针，不注入全文 |
+| `GatePlugin`（conclude 阻断） | 同一条门（账为事实、效应为准）；模型在最终回答前自己 `krow check …`——验证是一步，不是一道闸 |
+| 工具内部调 LLM 的"聪明工具" | 被桥拒绝（`[llm]`）：拆成确定性部分 + 模型自己想（一环一脑） |
+| HITL（hitl-assistant demo） | `krow ask user "问题" --option A --option B [--default A]`；无人值守 + `--default` 直接按默认继续 |
+| 跑一个 demo 的 `main.py` | 不变（`AgentBuilder` 不调 `with_run_mode` 就是 klik） |
+
+> turbo 运行模式仅作回退（平台计划退役——治理决定，非代码现状），本 README 不提供 turbo 用法。
+
+让本地 `krow` 子进程看到 plugin 的工具：在项目根写一行 `.krow/cli_plugins.txt` → `contract_auditor_plugin:ContractAuditorTools`
+（或临时 `krow --plugins contract_auditor_plugin:ContractAuditorTools tool list`）。要点见 [`advanced-development-guide.md`](../../docs/advanced-development-guide.md) §1.10。
 
 ---
 

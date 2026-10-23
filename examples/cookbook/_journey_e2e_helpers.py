@@ -583,7 +583,7 @@ def assert_journey_with_retry(
 
     cloud env-error 仍不浪费 LLM 重跑（命中关键词 → 立即 ``pytest.skip``）.
 
-    用户原则约束 (AGENTS.md §0.0 准确性 > 完整性 > 速度 > 成本):
+    用户原则约束 (klik 继承原则：准确性 > 完整性 > 速度 > 成本，见 SDK 进阶指南 §1):
       retry 不降低测试严格性, 仅吸收 LLM 偶发抖动 (50%+ 实测抖动率, opus-4.6 long-form).
       若 ``max_attempts`` 次全 fail → 真有问题, fail-loud raise 最后一次的 AssertionError.
     """
