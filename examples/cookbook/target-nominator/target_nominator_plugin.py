@@ -16,9 +16,9 @@
 - 1 个 GatePlugin：TargetNominationIntegrityGate（反编造：无真取数 / 全 ungrounded → BLOCK）
 - 1 个 ACTPlugin：target_nominator（提名工作流 ACT）
 
-设计原则（对齐 AGENTS.md TURBO 哲学 + litsci worker §13 增补设计）：
+设计原则（对齐 SDK 进阶指南 §1 klik 继承原则 + litsci worker §13 增补设计）：
 
-1. **TURBO 边界**
+1. **System 1 / System 2 边界（klik 继承原则）**
    - 取数（HTTP + 归一）、加权聚合（算术）、接地校验 = System 1 确定性工具
    - "选谁做最佳靶点、提名理由怎么写" = System 2（LLM 在 ACT 流程内决策）
    - 每维数值**必须来自工具返回**（带 source url）；无来源 → ungrounded → gate BLOCK
@@ -59,7 +59,7 @@ _HTTP_TIMEOUT = 30
 # §-1. 取数捕获（供 main.py 确定性收口结构化产物 + 溯源）
 # ============================================================
 #
-# 为什么需要（TURBO"数据注入≠数据采用"铁证 · 2026-07-11 三连败）：
+# 为什么需要（klik 继承原则"数据注入≠数据采用"铁证 · 2026-07-11 三连败）：
 #   LLM 会稳定地调 fetch 工具真取数（报告里出现真 Ensembl id / OT 分），却**不采用**
 #   打分工具的结构化输出——它自己在报告里重算 ranking、自己手写 target_scores.json
 #   （缺 ranking/matrix/grounded）、用"Human Protein Atlas"名字而非 url 溯源。三次真跑
@@ -67,7 +67,7 @@ _HTTP_TIMEOUT = 30
 #
 #   解（System 1 收口）：把**确定性结构化产物**（打分矩阵 JSON + 数据来源 url）交给
 #   orchestrator（main.py）从捕获的工具取数结果确定性生成；LLM 只管**叙事**（提名理由）。
-#   这正是 TURBO"语义交 LLM、语法交系统"——ranking/matrix/溯源是语法（确定性），
+#   这正是 klik 继承原则"语义交 LLM、语法交系统"——ranking/matrix/溯源是语法（确定性），
 #   提名论证是语义（LLM）。
 #
 # 捕获默认关闭（smoke 单测直调工具不应有全局副作用）；main.py 跑前显式 enable。
@@ -664,7 +664,7 @@ def score_target_candidates(
     # grounded_fetch = 是否至少一条打分带 source（gate 据此判"有没有真取数"）
     any_grounded = any(e["source"] for e in sc)
     # 唯一化所有数据来源 url（保持传入顺序）→ 供 LLM COPY VERBATIM 的"数据来源"章节。
-    # TURBO"数据注入≠数据采用"教训：只把 source 塞进工具返回不够，LLM 写报告时会
+    # klik 继承原则"数据注入≠数据采用"教训：只把 source 塞进工具返回不够，LLM 写报告时会
     # 丢掉；给一个可直接原样粘贴的 finished artifact（## 数据来源）才能稳定溯源。
     data_sources: list[str] = []
     for e in sc:

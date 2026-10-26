@@ -212,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
 
     agent = builder.build()
     # 启用工具取数捕获：让 main.py 跑完后能确定性收口结构化产物（打分矩阵 JSON +
-    # 数据来源 url），不依赖 LLM 手抄（TURBO"数据注入≠数据采用"教训，见 plugin §-1）。
+    # 数据来源 url），不依赖 LLM 手抄（klik 继承原则"数据注入≠数据采用"教训，见 plugin §-1）。
     reset_capture()
     try:
         request = _build_request(
@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
 
-        # ── System 1 确定性收口（TURBO：语法交系统 · 见 plugin §-1）──────────
+        # ── System 1 确定性收口（klik 继承原则：语法交系统 · 见 plugin §-1）────
         # LLM 稳定真取数（报告有真 Ensembl id / OT 分）却不采用打分工具的结构化输出：
         # 自己重算 ranking、手写残缺 target_scores.json、用名字而非 url 溯源。用捕获的
         # **工具自产产物**确定性收口，LLM 只留叙事（提名理由）。
@@ -269,7 +269,8 @@ def _finalize_artifacts(*, md_path: Path, scores_path: Path) -> None:
     """跑后 System 1 收口：确定性落打分矩阵 JSON + 兜底报告数据来源 url.
 
     两件事都用**工具自产的结构化产物**（打分工具返回 / 取数捕获），不改 LLM 的语义
-    决策（提名理由 / 各维有利度判断），只补"语法级"确定性产物——对齐 TURBO 边界：
+    决策（提名理由 / 各维有利度判断），只补"语法级"确定性产物——对齐 System 1 / System 2 边界
+    （klik 继承原则）：
     ranking/matrix/溯源 url = 语法（系统保证），提名论证 = 语义（LLM 保留）。
     所有动作 fail-soft + 打印可见，绝不吞异常导致主流程崩。
     """

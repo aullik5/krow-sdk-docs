@@ -270,7 +270,7 @@ BFF 直接 `AgentBuilder().with_project_root(...).build()`，进程内 `agent.ru
 它的关键经验（务必照搬）：
 
 > 不靠"巨型 macro-ReACT 一把跑完"（易在 step 解析/重规划上空转），而是用**确定性代码**把
-> 引擎里已验证可靠的**单发能力**串起来（TURBO 哲学：System 1 编排 + System 2 单发）：
+> 引擎里已验证可靠的**单发能力**串起来（klik 继承原则：System 1 编排 + System 2 单发）：
 
 ```
 0. 规划：scan_knowledge_sources        (System 1 · 零 LLM)

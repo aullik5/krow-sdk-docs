@@ -1,6 +1,6 @@
 # Krow Agent SDK Runtime 安装指南（外部开发者）
 
-> **当前状态（2026-05-19 W5 closeout）** ✅：v2 reverse-proxy 协议**全部上线，外部开发者可一行装齐**：
+> **当前状态（2026-10-23）**：✅ v2 reverse-proxy 协议**全部上线**，`pip install krow-agent-sdk krow-sdk-install` + `krow-sdk-install` 即可装 runtime；🚧 **与当前 PyPI `krow-agent-sdk` `0.9.5.27` 同版的 runtime 尚未发布到 TOS**（本文更新时构建仍在进行；TOS 最新已发布 runtime 为 `0.9.5.26`）。SDK 与 runtime 应完全同版：要同版配对请 `pip install krow-agent-sdk==0.9.5.26` 再装 runtime，或等 runtime 0.9.5.27 上 TOS 后 `pip install -U krow-agent-sdk` 并重新运行 `krow-sdk-install`（已装旧版 runtime 时先 `pip uninstall krow-agent-sdk-runtime`）——届时本提示即失效。PyPI 当前的 `krow-sdk-install` 是 `0.8.12.12`：不带版本参数，总是装 TOS 上最新已发布的 runtime；§2.1–2.2 的「默认对齐已装 SDK 版本 / `--latest` / `--version`」是 `krow-sdk-install` 新版的行为（源码已实现、PyPI 尚未发布，发布后以 `krow-sdk-install --help` 为准）。0.9.5 起默认运行模式 klik，详 [`quickstart.md`](./quickstart.md) §0.1；下文示例里出现的 `0.8.12.x` 版本号是写作当时的实测值，**只示意用法**。
 > ```bash
 > pip install krow-agent-sdk krow-sdk-install
 > export KROW_API_KEY=sk-user-xxxxxxxxxxxxxxxxxxxxx
@@ -14,7 +14,7 @@
 >   修复 wheel-only 部署模式下 `ai_search` 等 P0 内置工具未注册的回归（KrowChat 反馈 round 2 / hf24/27 都未根治）。
 >   `AgentBuilder().build()` 完成时 `ToolManager` 一定含 `ai_search` / `llm_generate` / `smart_read_document` / `save_image`。
 >   反模式 "主仓 dev mode ≠ wheel 部署 mode" 已加入 AGENTS.md §0.1。。
-> - 2026-05-19（W5 closeout）：`krow-sdk-install` 首次上 PyPI prod（trusted publisher 配置完成）；三 cookbook real LLM E2E 多次 stable PASSED；W5 修复 5 个 P0 bug（详 [`CHANGELOG_v0.8.12.11.md`](./CHANGELOG_v0.8.12.11.md)）
+> - 2026-05-19（W5 closeout）：`krow-sdk-install` 首次上 PyPI prod（trusted publisher 配置完成）；三 cookbook real LLM E2E 多次 stable PASSED；W5 修复 5 个 P0 bug（详 PyPI 项目页的版本历史）
 > - 2026-05-19（W4 closeout）：完整 install 链路 SDK team 实测跑通（4 分 33 秒装 runtime + SDK + 100+ deps）；prod gateway DNS cutover 完成
 > - 2026-05-16：v2 reverse-proxy 协议与 Krow Cloud team 锁定
 > **设计 v2 reverse-proxy**：
@@ -35,7 +35,7 @@
 | ``krow-agent-sdk-runtime`` | 私有 runtime：核心算法 + ACT 工具实现（Cython 编译） | Krow Cloud 反向代理（TOS-backed） | `KROW_API_KEY` Bearer token |
 
 只装公开 SDK 时：可写 plugin、跑 plugin 单元测试，但不能 ``agent.run()``.
-装上 runtime 后：可调真正的 ReACT 引擎、跑完整 agent 任务.
+装上 runtime 后：可跑完整 agent 任务（0.9.5 起默认 klik 运行模式：一条对话、一个决策者，模型用 shell + `krow <子命令>` 组合能力）.
 
 ---
 
@@ -104,7 +104,7 @@ krow-sdk-install --api-key $KROW_API_KEY --upgrade   # 或 -U
 `--upgrade` 会向 `pip install` 传 `--upgrade`，确保已装旧版本时强制升级（修复"pip 报
 already satisfied 拒绝升级"的体验问题）。
 
-> ⚠️ **默认对齐已安装 SDK 版本（2026-06-17）**：不带 `--version` / `--latest` 时，
+> ⚠️ **默认对齐已安装 SDK 版本（2026-06-17 起的新版 CLI 行为；PyPI 当前发布 0.8.12.12 尚不含本节的 `--upgrade` / `--force-reinstall` / `--latest` 与 §2.2 的 `--version`，用它升级 runtime 请先 `pip uninstall krow-agent-sdk-runtime` 再重新运行 `krow-sdk-install`；见文首「当前状态」）**：不带 `--version` / `--latest` 时，
 > CLI 会自动把 runtime 对齐到当前环境已安装的 `krow-agent-sdk` 版本（二者同出一份
 > 版本 SSOT，应逐段一致），避免 "base image 版本不匹配"。要显式取最新 runtime（忽略
 > 已装 SDK 版本）用 `--latest`：
@@ -130,7 +130,8 @@ krow-sdk-install --api-key $KROW_API_KEY --version 0.8.12      # 段前缀：命
 
 `--version` 支持**精确**或**段前缀**匹配（按 `.` 分段）：`0.8.12` 命中 `0.8.12.60`，但
 `0.8.1` **不会**误命中 `0.8.12.*`（段比对 `1` ≠ `12`）。指定版本在当前 host 兼容范围内
-不存在时 fail-loud（列出可用版本清单）。
+不存在时 fail-loud（抛 `VersionNotFoundError` 并列出可用版本清单，**不**回退到其它版本）；默认对齐已装
+SDK 版本而 TOS 尚无该版 runtime 时同样如此——请改用 `--version <已发布版本>` 或 `--latest`。
 
 ### 2.2.2 ⚠️ `uv sync` / `poetry install` 会卸载 runtime（重装兜底）
 
@@ -334,7 +335,7 @@ python --version  # 确认 3.11 / 3.12 / 3.13
 
 **原因**：你的 host platform tag 不在 runtime wheel matrix 内，或 `krow-sdk-install`
 < 0.8.12.12 的旧版本因 bug 把 macOS / Linux 兼容 wheel 也误判为 mismatch（见
-[CHANGELOG_v0.8.12.12](./CHANGELOG_v0.8.12.12.md)）。
+PyPI 项目页的 0.8.12.12 版本说明）。
 
 **先升级 installer**（**强烈推荐**）：
 

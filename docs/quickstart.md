@@ -3,8 +3,9 @@
 > 本教程让你在 5 分钟内用 Krow Agent SDK 跑一个真实 LLM hello-world，不需要桌面 app、不需要修改 krow 主仓代码。
 > **进阶资料**：
 > - [`api-reference.md`](./api-reference.md) — 完整 API 手册（15 章 / 57 子节）
-> - [`advanced-development-guide.md`](./advanced-development-guide.md) — TURBO 哲学 / 工具设计 / 测试方法论
-> **适用版本**：`krow-agent-sdk >= 0.9.2`（当前发布 `0.9.2.10`，2026-09-15）。历史下限：wheel-only 部署请至少用 `>= 0.8.12.28`（该版修复了 P0 内置工具集 `ai_search` / `llm_generate` / `smart_read_document` / `save_image` 在 wheel 部署模式下的注册缺失）。
+> - [`advanced-development-guide.md`](./advanced-development-guide.md) — klik 继承原则 / 工具设计 / 测试方法论
+> - [`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md) — **Krowwork 市场插件包（`plugin.json`）**开发与上架（与本文的 SDK Plugin Protocol 是两套东西，见 §0.1）
+> **适用版本**：`krow-agent-sdk >= 0.9.5`（当前 PyPI 发布 `0.9.5.27`，2026-10-23；0.9.5 起默认运行模式为 **klik**，见 §0.1）。历史下限：wheel-only 部署请至少用 `>= 0.8.12.28`（该版修复了 P0 内置工具集 `ai_search` / `llm_generate` / `smart_read_document` / `save_image` 在 wheel 部署模式下的注册缺失）。
 
 ---
 
@@ -17,19 +18,32 @@
 | **OS** | Windows 10+ / macOS 12+ / Linux x86_64（Apple Silicon arm64 也通） |
 | **网络** | 能访问 `https://api.krow.cn`（国内直连即可，无需代理） |
 
+### 0.1 先分清两个名字：SDK Plugin Protocol 与 Krowwork 市场插件包
+
+| 名字 | 是什么 | 用什么写 | 在哪读 |
+|---|---|---|---|
+| **SDK Plugin Protocol** | 本文及 [`api-reference.md`](./api-reference.md) §5 讲的 Python 协议类（ACT / Tool / Hint / Gate / EventListener / Observability / MCPServer / Security / DomainPack / VisualAdapter / DocumentParser），通过 `AgentBuilder.with_*_plugin(...)` 装进**你自己宿主的 agent** | Python 类 | 本文 §3–§4、`api-reference.md` §5、`advanced-development-guide.md` |
+| **Krowwork 市场插件包（`plugin.json`）** | 打成 `tar.gz` 上架到 Krowwork 插件市场、由主人装给**平台组员**的能力包（技能 `SKILL.md` + 纯 Python 工具包 + `mcp.json` 连接） | `plugin.json` 清单 + 目录约定 | [`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md) |
+
+两者不是同一套协议，也不能互相替代：市场插件包里的 `tools/` 走的是 `krow tool run` 的加载路径（`ToolPlugin` 同款 `get_tools()` 形状），但**上架、审核、分发安装**由平台侧流程决定，SDK 管不到。
+
+**运行模式**：`krow-agent-sdk` 0.9.5 起 `agent.run_mode` 默认为 `klik`（一条对话、一个决策者；执行主轴是 shell 与文件系统，模型用 `krow <子命令>` 组合能力）。你在本文写的 plugin **不用改一行**就在 klik 下工作，差别只在模型"看见"它们的方式：`ToolPlugin` 的工具通过 `krow tool list / help / run` 被发现和调用，`ACTPlugin` 的方法论通过 `krow skill show act:<name>` 只读投影。`AgentBuilder.with_run_mode()` / 环境变量 `KROW_RUN_MODE` 仍能切回 `turbo`，但 turbo 是**回退模式、平台计划退役（治理决定，非代码现状）**——新项目不要按 turbo 写文案，本文也不再提供 turbo 用法（回退口径与历史资料入口见 [`roadmap.md`](./roadmap.md)「当前状态」）。
+
 ---
 
 ## 1. 安装（30 秒）
 
-> **当前发布状态**（2026-09-15）：✅ **PyPI 三件套全齐**：
+> **当前发布状态**（2026-10-23）：✅ 公开 SDK 与 runtime 安装 CLI 已在 PyPI；🚧 **与 SDK 0.9.5.27 同版的 runtime 尚未发布到 TOS**（见下方「runtime 版本对齐提示」）：
 > ```bash
-> pip install -U krow-agent-sdk                # 公开 SDK（plugin protocol + facade · 当前 0.9.2.10）
-> pip install -U krow-sdk-install              # runtime 安装 CLI
+> pip install -U krow-agent-sdk                # 公开 SDK（SDK Plugin Protocol + facade · 当前 0.9.5.27）
+> pip install -U krow-sdk-install              # runtime 安装 CLI（PyPI 当前 0.8.12.12）
 > krow-sdk-install --api-key $KROW_API_KEY     # 走 prod gateway 拉 sdk-runtime wheel
 > ```
-> sdk-runtime 与 SDK 同版发布（`runtime-v0.9.2.10` tag → TOS prod 已发布；
-> 9 wheel matrix 含 P0 tool registration smoke step 守门，确保 wheel-only Pod 部署后 `AgentBuilder().build()`
-> 完成时 `ai_search` 等 4 个 P0 工具一定注册到 `ToolManager`）。
+> sdk-runtime 随 SDK 同版列车发布（`runtime-v<版本>` tag → TOS prod）；9 wheel matrix 含 P0 tool registration smoke step 守门，
+> 确保 wheel-only Pod 部署后 `AgentBuilder().build()` 完成时 `ai_search` 等 4 个 P0 工具一定注册到 `ToolManager`。
+> **runtime 版本对齐提示（2026-10-23）**：SDK 与 runtime 同出一份版本号，应**完全一致**。本文更新时 runtime `0.9.5.27` 的构建仍在进行、尚未上 TOS，TOS 上最新已发布的 runtime 是 **`0.9.5.26`**。
+> - PyPI 当前的 `krow-sdk-install`（0.8.12.12）不带版本参数，总是装 TOS 上**最新已发布**的 runtime——照上面三行装完会得到 SDK 0.9.5.27 + runtime 0.9.5.26 的错版组合。要同版配对：`pip install krow-agent-sdk==0.9.5.26` 后再 `krow-sdk-install`；或等 runtime 0.9.5.27 上 TOS 后 `pip install -U krow-agent-sdk` 并重新运行 `krow-sdk-install`（已装旧版 runtime 时先 `pip uninstall krow-agent-sdk-runtime`）——届时本提示即失效。
+> - `krow-sdk-install` 新版（源码已实现，PyPI 尚未发布）默认把 runtime 对齐到**已装 SDK 版本**，TOS 缺该版 runtime 时直接报 `VersionNotFoundError`、不回退上一版；届时用 `krow-sdk-install --version <已发布版本>` 指定版本，或 `--latest` 取 TOS 最新（详 [`runtime-install.md`](./runtime-install.md) §2.1–2.2）。
 > EULA 当前为 v1.1 DRAFT（含 good-faith 披露），等真律师签字后转 EFFECTIVE
 > （详 [`roadmap.md`](./roadmap.md) Step 2 P2）。
 > 下文 §1.1-§1.2 是 **Krow team collaborator** 的开发模式入门（monorepo / dev wheel）；
@@ -706,7 +720,7 @@ agent = (
 完成 hello world 后：
 
 1. **业务上**：把第 3 节的 ACT 模板改成你领域的（工业设计 / 法律 / 教研 ...）
-2. **架构上**：读 [`api-reference.md`](./api-reference.md) §5 的 10 类 plugin protocol（6 stable + 4 experimental）；[`advanced-development-guide.md`](./advanced-development-guide.md) §1 TURBO 哲学 / §4 ACT 最佳实践 / §6 测试方法论
+2. **架构上**：读 [`api-reference.md`](./api-reference.md) §5 的 10 类 plugin protocol（6 stable + 4 experimental）；[`advanced-development-guide.md`](./advanced-development-guide.md) §1 klik 继承原则 / §4 ACT 最佳实践 / §6 测试方法论
 3. **测试上**：用 `LLMReplayStore` + `AgentBuilder.with_replay_store()` 写 record / replay 单测（详 §5.5 + [`api-reference.md`](./api-reference.md) §7）；含 `tests/` 的 monorepo 安装可用 `from krow_agent_sdk.test_sdk import HeadlessAgentHarness`
 4. **想让 agent 对你的领域"卡住了"有感觉**：读 [`advanced-development-guide.md`](./advanced-development-guide.md) §10（决策脑三注册表 + 控制反射 + §10.10 能力边界三档），跑 `examples/cookbook/litsci-metacog/`（零 LLM，可直接改成你的领域）。默认情况下决策脑对你的垂直任务是**全盲**的：它不知道你离交付还差多少，也就叫不醒任何人
 5. **生产上**：set `KROW_SDK_TELEMETRY=1` 帮 krow 团队改进 SDK；set `KROW_SDK_HTTP_GATEWAY=1` 让外部 UI 接入
@@ -719,7 +733,9 @@ agent = (
 | Step 2 P0 | M1-M4 | ✅ 已落地 | `packages/krow-agent-sdk/` 子包 + dual-build CI + nightly + SBOM + OIDC publish workflow（待 release engineer 配 OIDC + 打 tag 即正式发布） |
 | Step 2 P1 | PR #224 / #227 / #230 | ✅ 已落地 | `with_default_model`（已废弃，详 chore/sdk-model-selection-api 取代为 6 个 `with_<cat>_model`）/ `with_replay_store` / `MCPServerPlugin` form-C |
 | Step 2 P2 | PR #239 | ✅ visual_inspect plugin 完整公开（独立 `VisualAdapterPlugin` protocol + `with_visual_adapter(ext, cls)` 链式 API + `from krow_agent_sdk.visual import VisualAdapter` namespace） |
-| Step 3+ | 长期 | 计划中 | knowledge_compiler 开放式 domain pack ontology editor、多 plugin IPC、plugin marketplace |
+| 0.9.5 klik | K0–K4 | ✅ 已落地 | `agent.run_mode` 默认 `klik`（`with_run_mode()` / `KROW_RUN_MODE` 可切；turbo 为回退模式、平台计划退役）；`krow tool list/help/run` 发现与调用 ToolPlugin 工具；`krow skill show act:<name>` 只读投影 ACT |
+| Krowwork 市场插件包 | 公开指南 | ✅ 开发规范已发布 | [`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md)（`plugin.json` 格式 `krow-plugin/1`）；**生产提交 / 审核 / 分发安装三段：规划 / 实验·以平台公告为准** |
+| Step 3+ | 长期 | 计划中 | knowledge_compiler 开放式 domain pack ontology editor、多 plugin IPC |
 
 完整路线图 + 每个 Wave 的待办：见 [`docs/sdk/roadmap.md`](./roadmap.md)（SSOT），`AGENTS.md` §十一 仅一行指针。
 
@@ -851,5 +867,5 @@ cloud 当前可选清单 → `GET /v1/models`（按 capability 过滤；详 `mod
 
 ---
 
-> 文档版本：v1.3（2026-09-15，配套 `0.9.2.10` PyPI release）
+> 文档版本：v1.4（2026-10-23，配套 `0.9.5.27` PyPI release；klik 默认模式 + 市场插件包指南分流）
 > 维护：在 SDK 主版本变化时更新；外部开发者反馈的 FAQ 直接累积到第 8 节。

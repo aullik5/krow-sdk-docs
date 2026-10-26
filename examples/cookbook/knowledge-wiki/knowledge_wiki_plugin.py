@@ -308,7 +308,7 @@ def report_wiki_coverage(
 # §2.5 知识编译三段（抽取 / 关联 / 物化）—— 复用引擎内置 System 1/2 能力
 # ============================================================
 #
-# 设计哲学（AGENTS.md §0.1 TURBO + SSOT）：
+# 设计哲学（klik 继承原则：语义交模型、语法交系统 + SSOT）：
 #   这三个工具**不重写**抽取 / 关系 / 物化逻辑，而是把引擎里**已验证可靠**的
 #   单发能力封成"可被 agent 调、也可被 main.py 确定性编排"的工具：
 #     - 抽取（System 2）：``extractive_tools.tool_extract_entities_from_text``
@@ -319,7 +319,7 @@ def report_wiki_coverage(
 #       —— 把本体节点确定性派生为可点击 wiki stub 词条（红链物化，公理 D）。
 #   为什么不直接让 macro-ReACT 一把跑完：单发工具比"巨型 ReACT 循环"可靠得多
 #   （后者易在 step 解析/重规划上空转）。main.py 用 System 1 编排串起单发 System 2，
-#   正是 TURBO 哲学的落地。所有内置依赖**惰性 import**（保 plugin standalone 可导入）。
+#   正是 klik 继承原则的落地。所有内置依赖**惰性 import**（保 plugin standalone 可导入）。
 
 
 def _resolve_store(project_root: Path) -> Any:

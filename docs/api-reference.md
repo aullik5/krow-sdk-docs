@@ -1,11 +1,12 @@
 # Krow Agent SDK · API Reference Manual
 
-> **版本**：`krow-agent-sdk == 0.9.2.10`
-> **最后更新**：2026-09-15
+> **版本**：`krow-agent-sdk == 0.9.5.27`
+> **最后更新**：2026-10-23
 > **稳定性级别**：**Stable**（除"⚠️ experimental"标记的 API 外，其余 API 遵循 SemVer）
 > **配套文档**：
 > - [`quickstart.md`](./quickstart.md) — 5 分钟入门
-> - [`advanced-development-guide.md`](./advanced-development-guide.md) — TURBO 哲学、设计原则、最佳实践
+> - [`advanced-development-guide.md`](./advanced-development-guide.md) — klik 继承原则、设计原则、最佳实践
+> - [`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md) — Krowwork 市场插件包（`plugin.json`）开发与上架；本手册 §5 的 Plugin Protocols 是 **SDK Plugin Protocol**（Python 协议类），两者不是同一套东西
 > - [`runtime-install.md`](./runtime-install.md) — sdk-runtime wheel 安装
 
 ---
@@ -19,6 +20,7 @@
   - [§2.2 工厂方法](#22-工厂方法)
   - [§2.3 LLM 模型选择 API（6 类）](#23-llm-模型选择-api6-类)
   - [§2.4 预算与 HTTP Gateway](#24-预算与-http-gateway)
+  - [§2.4.4 运行模式 `with_run_mode` / `KROW_RUN_MODE`（0.9.5+，默认 klik）](#244-运行模式-with_run_mode--krow_run_mode095默认-klik)
   - [§2.5 Plugin 直接注入（6 stable + 3 experimental）](#25-plugin-直接注入6-stable--3-experimental)
   - [§2.6 Visual Adapter 注入（3 路径）](#26-visual-adapter-注入3-路径)
   - [§2.6.1 Document Parser 注入（2 路径）](#261-document-parser-注入2-路径)
@@ -611,6 +613,42 @@ agent = (
 
 ---
 
+### §2.4.4 运行模式 `with_run_mode` / `KROW_RUN_MODE`（0.9.5+，默认 klik）
+
+#### `with_run_mode(run_mode: str) -> AgentBuilder`
+
+声明本 agent 的运行模式。**0.9.5 起安装默认是 `klik`**（一条对话、一个决策者；执行主轴是 shell 与文件系统，模型用 `krow <子命令>` 组合能力），不调用本方法就是 klik。
+
+| 项 | 取值 / 行为 |
+|---|---|
+| 接受的值 | `"klik"` / `"turbo"`；大小写不敏感、首尾空白忽略 |
+| 拒绝的值 | 非字符串 / 空串 / 不在白名单的值 / `"solution"` → 抛 `ValueError`（显式声明却给了系统认不得的值，不静默回落——"指定≠采用"反模式） |
+| 解析优先级（高 → 低） | `task_context["run_mode"]`（单次 `run` 显式传）> `with_run_mode()`（实例）> 环境变量 `KROW_RUN_MODE`（进程 / 容器）> 安装默认 `agent.run_mode`（0.9.5 起 `klik`） |
+| 注入方式 | 本方法的值以 `setdefault` 进每次 run 的 `task_context`，调用方 per-run 显式传 `{"run_mode": ...}` 仍然优先 |
+| 前置条件 | 需已安装 runtime（与 `build()` 同款要求）：本方法校验取值时从 runtime 读运行模式白名单，**仅装公开 wheel、未装 runtime** 时任何取值（含合法的 `"klik"`）都抛 `ModuleNotFoundError: No module named 'modules'`，而不是上面的 `ValueError`；装好 runtime 后行为与本表一致 |
+| `turbo` 的地位 | **回退模式**：代码路径保留，平台计划退役（治理决定，非代码现状）。本手册不提供 turbo 用法与兼容指导；历史资料见 [`archive/turbo-legacy.md`](./archive/turbo-legacy.md)（仅归档） |
+
+```python
+agent = (
+    AgentBuilder().from_env()
+    .with_run_mode("klik")        # 可省略：0.9.5 起默认即 klik
+    .build()
+)
+```
+
+**klik 下你的 plugin 怎么被模型用到**（详 [`advanced-development-guide.md`](./advanced-development-guide.md) §1.10）：
+
+| 你注册的 | 模型侧入口（shell） | 说明 |
+|---|---|---|
+| `ToolPlugin`（§5.2） | `krow tool list [--prefix <前缀>]` → `krow tool help <工具名>` → `krow tool run <工具名> --arg k=v` / `--arg-file k=<文件>` / `--json` | 列表里插件工具带 `[plugin]`；`get_tools()` 的 `input_schema` 每个字段的 `description` 就是 `krow tool help` 的输出，务必写全；handler 返回 `{"error": "..."}` 时 `krow tool run` 以 rc=1 结束、原因在 stderr（`--json` 时 stdout 为空） |
+| `ACTPlugin`（§5.1）/ 外部 `SKILL.md`（§2.7.1） | `krow skill show act:<name>` | 只读投影：骨架里只有一行指针（`task_context.act_name`），全文由模型按需读取，不注入 prompt |
+| `GatePlugin`（§5.4） | 同一条门 | 验证是一步：模型在最终回答前自己执行验证命令（`krow check …`），quality / closure 类检查退为只读事实，不拦步 |
+| `HintPlugin`（§5.3） | 不注入骨架 | 领域知识请写进 SKILL / ACT 文案或工具 `description`（骨架有预算、能力无菜单） |
+
+让本地 `krow` 子进程看见你的 `ToolPlugin`：项目根写一行 `.krow/cli_plugins.txt`（`<模块>:<类名>`，或 `<tools 目录绝对路径>::<模块>:<类名>`），或临时 `krow --plugins <模块>:<类名> tool list`。`krow` 子命令的返回码约定：`0` 成功 / `1` 业务失败 / `2` 参数错误 / `3` 环境不可用（例如只装了公开 wheel 没装 runtime：`krow tool list` rc=3 并提示安装 runtime）。
+
+---
+
 ### §2.5 Plugin 直接注入（6 stable + 3 experimental）
 
 | 方法 | 协议 | 稳定性 | 详见 |
@@ -1176,7 +1214,7 @@ finally:
     agent.shutdown()
 ```
 
-#### 反模式（设计文档 §0.1 TURBO 哲学）
+#### 反模式（继承原则总则①：System 1 / System 2 分工）
 
 - ❌ 在 `event handler` / for-loop body 内调 LLM / 重 IO（会阻塞 EventBus 线程）
 - ❌ 多次调 `run_stream()` 复用同一 Agent + 同一 session_id（AgentV3 是 stateful，并发会乱）
@@ -1904,7 +1942,7 @@ class ResearchHintPlugin:
         )
 ```
 
-> **铁律（设计文档 §0.1 TURBO）**：hint 是给 LLM 的语义建议，不能用来"教 LLM 别用某工具"或"教 LLM 别犯错"。物理性约束应通过 [GatePlugin](#54-gateplugin--加新-concludeguard-gate-p4) 或 ACT 工具白名单实现。
+> **铁律（继承原则总则①）**：hint 是给 LLM 的语义建议，不能用来"教 LLM 别用某工具"或"教 LLM 别犯错"。物理性约束应通过 [GatePlugin](#54-gateplugin--加新-concludeguard-gate-p4) 或 ACT 工具白名单实现。klik（0.9.5 起默认）下 hint 不注入系统骨架，领域知识请写进 SKILL / ACT 文案或工具 `description`（见 §2.4.4）。
 
 ---
 
@@ -3453,7 +3491,7 @@ for item in agent.run_stream("……"):
 from krow_agent_sdk.honesty import strip_system1_honesty_blocks
 ```
 
-`final_output` 里除了智能体自己写的正文，还可能被引擎追加**系统披露**：截断了、产物没齐、验收没达标。这些是 System-1 的如实交代（"准确性 > 完整性"，见 [AGENTS.md](../../AGENTS.md) §0.0），面向的是**读正文的人**，所以它们必须在正文里可见。披露种类会随引擎演进增长——例如 0.9.2.9 起新增 `final_verification_low_confidence`：最终验证在低置信（confidence < 0.70）下放行时，置信度、未验证项与未处理失败步会如实披露到最终回复（此前这条信息只活在日志里，用户全程不知情）。
+`final_output` 里除了智能体自己写的正文，还可能被引擎追加**系统披露**：截断了、产物没齐、验收没达标。这些是 System-1 的如实交代（"准确性 > 完整性"，见 [`advanced-development-guide.md`](./advanced-development-guide.md) §0），面向的是**读正文的人**，所以它们必须在正文里可见。披露种类会随引擎演进增长——例如 0.9.2.9 起新增 `final_verification_low_confidence`：最终验证在低置信（confidence < 0.70）下放行时，置信度、未验证项与未处理失败步会如实披露到最终回复（此前这条信息只活在日志里，用户全程不知情）。
 
 但宿主如果按正文抽结论，就会把披露当成智能体的输出。已实测到的形状：验收员那一步末尾被追加了 `final_verification_shortfall` 披露，句子是"验收本身没达标"，宿主把它读成了"被验收的产物不合格"，于是组员白返工。
 
@@ -3674,6 +3712,7 @@ finally:
 |---|---|---|
 | `KROW_API_KEY` | (空) | API key（`AgentBuilder.from_env()` 读） |
 | `KROW_PROJECT_ROOT` | (空) | 项目根（`AgentBuilder.from_env()` 读） |
+| `KROW_RUN_MODE` | (空 → 安装默认 `klik`) | 运行模式 `klik` / `turbo`（0.9.5+；优先级低于 `task_context["run_mode"]` 与 `with_run_mode()`，见 §2.4.4）。`turbo` 仅作回退模式，平台计划退役 |
 | `KROW_SDK_BUILD_VALIDATE_CONNECTION` | `1` | `build()` 默认是否做启动期连接校验 |
 | `KROW_SDK_PLUGIN_ERROR_MODE` | `swallow` | plugin 错误模式：`swallow` / `raise` / `quiet` |
 | `KROW_SDK_HTTP_GATEWAY` | `0` | feature flag：自动启用 HTTP Gateway（默认 host/port） |

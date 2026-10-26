@@ -21,7 +21,8 @@
 - HitlAssistantACTPlugin: 自定义 "hitl_assistant" ACT
 
 设计原则（与 advanced-development-guide.md / AGENTS.md §0.2 对齐）：
-- TURBO 边界：工具是 System 1（不调 LLM；deterministic；unit-test 100% 覆盖）
+- System 1 / System 2 边界（klik 继承原则）：工具是 System 1
+  （不调 LLM；deterministic；unit-test 100% 覆盖）
 - 错误信息：黄金模板（原因 + 位置 + 修法）
 - 强制确认门是 **System 1 闸门**：哪怕 LLM 忘了问，框架也会在
   ``cad_apply_param_change`` 执行前必停（详 api-reference §3.5）

@@ -11,7 +11,7 @@ HintPlugin（3σ 异常 KPI 提示）+ 1 个 EventListenerPlugin（投资简报�
 留痕）+ 1 个 ObservabilityPlugin（Prometheus push gateway 集成）+
 1 个 ACTPlugin（让 LLM 自动选入此 ACT）。
 
-设计原则（与 ``AGENTS.md`` §0.1 TURBO 哲学 + §0.2 架构原则对齐）：
+设计原则（与 SDK 进阶指南 §1 klik 继承原则 + §2 架构原则对齐）：
 
 1. **System 1 vs System 2 严格区分**
    - 工具：纯 deterministic 算法（KPI 同口径归一化 / 雷达图几何计算 /
@@ -28,7 +28,7 @@ HintPlugin（3σ 异常 KPI 提示）+ 1 个 EventListenerPlugin（投资简报�
    - 雷达图 / 柱状图 → 不引第三方依赖；用 SVG 文本字符串（LLM 友好；
      可被 word_smart_export 以图片形式嵌入）
 
-4. **TURBO 不混做**
+4. **System 1 / System 2 不混做（klik 继承原则）**
    - 工具内绝不调 LLM（CI 红线）
    - hint 不教 LLM 算行业均值（系统能算的不让 LLM 凭感觉）
 

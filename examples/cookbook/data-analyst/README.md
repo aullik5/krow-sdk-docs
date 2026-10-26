@@ -124,7 +124,7 @@ data-analyst/
 
 ### 为什么 `detect_anomalies` 是 System 1 工具不是 LLM 推理？
 
-按 TURBO 哲学，**异常检测是确定性数值计算**——必须 System 1 化：
+按 klik 继承原则（语义交模型、语法交系统），**异常检测是确定性数值计算**——必须 System 1 化：
 
 | | System 1（本工具） | System 2（LLM 凭感觉判断） |
 |---|---|---|

@@ -16,10 +16,10 @@
 
 ### Step 2: 装 SDK（公开包 + 私有 runtime）
 
-> **当前发布状态**（2026-09-15）：✅ **PyPI 三件套全齐 + 一行装齐**：
-> - ✅ `krow-agent-sdk==0.9.2.10` 已发 PyPI 主站（2026-09-15）
-> - ✅ `krow-sdk-install` 已发 PyPI 主站（`pip install -U krow-sdk-install` 取最新即可）
-> - ✅ `krow-agent-sdk-runtime==0.9.2.10` 在 prod TOS（与 SDK 同版发布，9 wheel matrix + CI P0 tool registration smoke 守门）
+> **当前发布状态**（2026-10-23）：✅ 公开 SDK 与安装 CLI 已在 PyPI；🚧 与 SDK 0.9.5.27 同版的 runtime 尚未发布到 TOS：
+> - ✅ `krow-agent-sdk==0.9.5.27` 已发 PyPI 主站（2026-10-23；0.9.5 起默认运行模式 **klik**，详 [`quickstart.md`](./quickstart.md) §0.1）
+> - ✅ `krow-sdk-install` 已发 PyPI 主站（`pip install -U krow-sdk-install`，当前 0.8.12.12：不带版本参数，总是装 TOS 上最新已发布的 runtime）
+> - 🚧 `krow-agent-sdk-runtime` 随 SDK 同版列车发到 prod TOS（9 wheel matrix + CI P0 tool registration smoke 守门）。**本文更新时 runtime `0.9.5.27` 构建仍在进行、尚未上 TOS，TOS 最新已发布 runtime 为 `0.9.5.26`**——SDK 与 runtime 应完全同版：要同版配对请 `pip install krow-agent-sdk==0.9.5.26` 再装 runtime，或等 runtime 0.9.5.27 上 TOS 后 `pip install -U krow-agent-sdk` 并重新运行 `krow-sdk-install`（已装旧版 runtime 时先 `pip uninstall krow-agent-sdk-runtime`）——届时本提示即失效。`krow-sdk-install` 新版（PyPI 尚未发布）默认对齐已装 SDK 版本，TOS 缺该版时报 `VersionNotFoundError`、不回退，需 `--version <已发布版本>` 或 `--latest`（详 [`runtime-install.md`](./runtime-install.md) §2.1–2.2）
 > - ✅ cookbook 12 个 demo 三平台（Linux / macOS / Windows）× 3 Python（3.11-3.13）smoke 每 PR 守门；real LLM E2E nightly 跑
 
 #### 推荐：一行 PyPI 装机（公开 SDK + install CLI）
@@ -108,7 +108,7 @@ python hello.py
 | `ModuleNotFoundError: 'modules'` | runtime wheel 没装；跑 `krow-sdk-install --api-key $KEY` |
 | `第一次 build() 慢 60-90s` | **正常**，不是 bug；后续秒级 |
 
-更多 troubleshooting 见 [`README.md`](./README.md) §8.
+更多 troubleshooting 见 [`runtime-install.md`](./runtime-install.md) §4 与 [`headless-deployment.md`](./headless-deployment.md) §6.
 
 ### 今日交付
 
@@ -585,7 +585,8 @@ agent = (
 |---|---|
 | [`quickstart.md`](./quickstart.md) | 5 分钟跑通；含 5 类 plugin 范例 |
 | [`api-reference.md`](./api-reference.md) | 完整 API 手册（15 章 / 57 子节）— 写 plugin 必看 |
-| [`advanced-development-guide.md`](./advanced-development-guide.md) | TURBO 哲学 / 工具设计 / 测试方法论 |
+| [`advanced-development-guide.md`](./advanced-development-guide.md) | klik 继承原则 / 工具设计 / 测试方法论 |
+| [`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md) | **Krowwork 市场插件包（`plugin.json`）**开发与上架——与 SDK Plugin Protocol 是两套东西；生产上架三段为规划 / 实验，以平台公告为准 |
 | [`runtime-install.md`](./runtime-install.md) | runtime wheel 装机详细步骤（v2 reverse proxy）|
 | [`roadmap.md`](./roadmap.md) | SDK 进度 SSOT |
 | [`EULA.md`](./EULA.md) | 商用条款（v1.1 DRAFT）|
@@ -604,4 +605,4 @@ agent = (
 
 欢迎入坑！
 
-— Krow Team · 2026-09-15（配套 `0.9.2.10` PyPI release）
+— Krow Team · 2026-10-23（配套 `0.9.5.27` PyPI release）

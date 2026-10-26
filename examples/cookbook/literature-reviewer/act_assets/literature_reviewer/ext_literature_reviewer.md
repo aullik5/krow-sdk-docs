@@ -148,5 +148,5 @@ BudgetSpec(
 
 - 设计文档：`packages/krow-agent-sdk/examples/cookbook/COOKBOOK_DESIGN.md` §2.2
 - 同系列 v3 demo：`packages/krow-agent-sdk/examples/cookbook/financial-analyst/`
-- TURBO 哲学：`AGENTS.md` §0.1
+- klik 继承原则（语义交模型、语法交系统）：SDK 进阶指南 §1
 - 规范依据：综述论文学术规范 / 学术不端处置办法

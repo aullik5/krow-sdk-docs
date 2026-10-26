@@ -12,7 +12,8 @@
 - 用 datasheet_batch_parse 把一批交给编排器，产 per-item 覆盖报告；
 - 用 DatasheetBatchCoverageGate 守门（全失败 / 覆盖率过低 → BLOCK conclude）。
 
-TURBO 边界：解析单份的**结构化字段抽取**可交 LLM（这里 cookbook 用确定性正则解析
+System 1 / System 2 边界（klik 继承原则）：解析单份的**结构化字段抽取**可交 LLM
+（这里 cookbook 用确定性正则解析
 合成 datasheet 以便零 LLM smoke；真实场景把 parse_one 换成 VLM/文档解析即可）；
 并发编排 / 身份归属 / 覆盖记账 = System 1 确定性（编排器负责）。
 """

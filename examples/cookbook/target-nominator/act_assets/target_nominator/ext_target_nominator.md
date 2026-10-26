@@ -15,7 +15,7 @@
    - **有效 efficacy**：肿瘤组织**高表达**→ 有利度高（HPA pathology）
    - **可药 druggability**：抗体 / 小分子可及（Open Targets tractability）
    - **广谱 breadth**：跨多癌种关联强（Open Targets associatedDiseases.score）
-4. **分工（TURBO）**：取数 + 加权聚合 + 接地校验 = 工具（System 1）；**选谁做最佳靶点 +
+4. **分工（klik 继承原则：语义交模型、语法交系统）**：取数 + 加权聚合 + 接地校验 = 工具（System 1）；**选谁做最佳靶点 +
    提名理由怎么写 = 你（LLM）**读打分矩阵 + 各维值 + 溯源后决策。
 5. **溯源章节必须原样粘贴（硬验收门）**：`target_nominator_score_candidates` 返回的
    `data_sources_markdown` 是已排好版的"## 数据来源"章节（逐条 HPA / Open Targets url）。

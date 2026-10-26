@@ -114,4 +114,4 @@ BudgetSpec(
 - 内置编译 E2E 金标准：`tests/fixtures/expected_cards/journey_wiki_compile_medical_v2.yaml`
 - 编译策略 SSOT：`modules/knowledge/reasoning_strategies.py::Strategy(id="knowledge_compile")`
 - 内置 wiki ACT：`modules/agent/act/acts/wiki_compiler/__act__.yaml`
-- TURBO 哲学：`AGENTS.md` §0.1
+- klik 继承原则（语义交模型、语法交系统）：SDK 进阶指南 §1

@@ -3,16 +3,33 @@
 > **维护者**：每完成一个 Wave / Phase 后更新本文件（不要把 roadmap 内容回写到 AGENTS.md，本文件是 roadmap SSOT）。
 > **决策原则**：Step 1 完成后才进 Step 2；Step 2 落地后才考虑 Step 3+。
 > **元规则提示**：roadmap 内容**只放本文件**，AGENTS.md 只放 1 行指针（避免 god file 反弹）。
+> **术语**：本文的「plugin」默认指 **SDK Plugin Protocol**（Python 协议类，`AgentBuilder.with_*_plugin`）；上架到 Krowwork 插件市场、装给平台组员的 **Krowwork 市场插件包（`plugin.json`）** 是另一套格式，凡涉及都会写全名。
+
+---
+
+## 当前状态（2026-10-23 · `krow-agent-sdk` 0.9.5.27）
+
+| 项 | 状态 |
+|---|---|
+| PyPI | ✅ `krow-agent-sdk==0.9.5.27`（2026-10-23）；`krow-sdk-install` 可用（PyPI 当前 0.8.12.12）；🚧 sdk-runtime 随 SDK 同版列车发到 prod TOS——2026-10-23 更新时 runtime `0.9.5.27` 构建仍在进行、TOS 最新已发布为 `0.9.5.26`（版本对齐提示见 [`quickstart.md`](./quickstart.md) §1 / [`runtime-install.md`](./runtime-install.md)） |
+| **运行模式** | ✅ **0.9.5 起默认 `klik`**（`agent.run_mode=klik`）：一条对话、一个决策者；执行主轴 shell + 文件系统；模型用 `krow <子命令>` 组合能力。切换：`task_context["run_mode"]` > `AgentBuilder.with_run_mode()` > `KROW_RUN_MODE` > 安装默认（详 [api-reference §2.4.4](./api-reference.md)） |
+| klik 波次 | ✅ K0 开关 + `krow tool list/help/run` 通用桥 → K1 单环循环 MVP（五把薄工具 + bash）→ K2 `krow doc/web/ai/img/check/job/skill` 族 + 平台拦截族（deliver / mail / team）+ ACT → `SKILL.md` 只读投影（`krow skill show act:<name>`）→ K3 `krow xlsx/docx/pptx` + HITL 挂起恢复 → K4 klik 默认开启 → K5 角色工具进 CLI（`.krow/cli_plugins.txt` / `--arg-file`）→ K6 验证之眼（`krow check render`）→ K7 `krow ask user --default` + 定时任务提案 → K8 记忆三层 + System-1 交付核对。全部已落地于 0.9.5 系列 |
+| **turbo 的地位** | **回退模式**：代码路径保留（`KROW_RUN_MODE=turbo` 可切），平台计划退役——这是治理决定，不是代码现状；归档与否待真机两腿（turbo / klik）parity 读数后再议。公开文档自 0.9.5.27 起不再提供 turbo 用法与兼容指导；历史章节原文保留在 [`archive/turbo-legacy.md`](./archive/turbo-legacy.md)（仅归档，不作推荐） |
+| 公开文档 | ✅ **9 份**对外文档 + cookbook 全目录自主仓自动镜像到 [aullik5/krow-sdk-docs](https://github.com/aullik5/krow-sdk-docs)：quickstart / external-developer-onboarding / runtime-install / headless-deployment / advanced-development-guide / api-reference / **plugin-marketplace-guide** / roadmap / EULA（另有非默认导航的 `archive/` 归档） |
+| **Krowwork 市场插件包（`plugin.json`）** | ✅ 开发规范公开：[`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md)（格式 `krow-plugin/1`：技能 `SKILL.md` + 纯 Python 工具包 + `mcp.json` 连接；本地自测 `krow tool list/help/run` 与平台组员同一条加载路径）。**生产侧「提交 → 审核 → 分发安装」三段：规划 / 实验·以平台公告为准**，公开文档不表述为已上线 |
+| EULA | 🚧 仍为 v1.1 DRAFT（good-faith disclosure），等持证律师签字 |
+
+> 下文 Step 1 / Step 2 / 「当前阻塞」为 2026-05 的历史记录，保留作时间线；与上表冲突处以上表为准。
 
 ---
 
 ## Step 1 ✅ 完成（2026-05-13）
 
-外部团队 monorepo 接入。`pip install -e ".[sdk]"` + 8 类 plugin protocol + read-only data facade + record/replay 一等公民。
+外部团队 monorepo 接入。`pip install -e ".[sdk]"` + 8 类 SDK Plugin Protocol（Python 协议类）+ read-only data facade + record/replay 一等公民。
 
 | Wave / PR | 关键能力 | 状态 |
 |---|---|---|
-| Wave 1（mvp_critical S1.x） | `AgentBuilder`、`Agent`、3 stable + 3 mvp 共 6 类 Plugin Protocol、SDKContext、events 只读 facade | ✅ |
+| Wave 1（mvp_critical S1.x） | `AgentBuilder`、`Agent`、3 stable + 3 mvp 共 6 类 SDK Plugin Protocol、SDKContext、events 只读 facade | ✅ |
 | Wave 2（stable S2.x） | `with_*_from_entry_points()` 自动发现（feature flag opt-in）、HintRegistry、deprecation 框架 | ✅ |
 | Wave 3（experimental） | `MCPServerPlugin` / `SecurityPlugin` / `DomainPackPlugin` 协议骨架 | ✅ |
 | Wave 4（krow_test_sdk） | `HeadlessAgentHarness` / `AgentRunResult` 测试基础设施公开 | ✅ |
@@ -78,7 +95,7 @@
 - ✅ `pip install krow-agent-sdk` + 写 plugin + record/replay 单元测试
 - 🚧 `agent.run()` 真实跑（等 M9 W4 上线，预计 2026-06）
 
-**公开文档仓**：[aullik5/krow-sdk-docs](https://github.com/aullik5/krow-sdk-docs)（2026-05-15 上线，**8 份**对外文档 + cookbook 全目录同步自 monorepo `docs/sdk/`：quickstart / external-developer-onboarding / runtime-install / headless-deployment / advanced-development-guide / api-reference / roadmap / EULA）
+**公开文档仓**：[aullik5/krow-sdk-docs](https://github.com/aullik5/krow-sdk-docs)（2026-05-15 上线；现为 **9 份**对外文档 + cookbook 全目录同步自 monorepo `docs/sdk/`：quickstart / external-developer-onboarding / runtime-install / headless-deployment / advanced-development-guide / api-reference / plugin-marketplace-guide / roadmap / EULA）
 
 外部团队 PyPI 接入：`pip install krow-agent-sdk` 独立子包，不依赖 krow monorepo。
 
@@ -104,7 +121,8 @@
 | 方向 | 备注 |
 |---|---|
 | 多 plugin 之间 IPC / 协作协议 | 让一个 plugin 调用另一个 plugin 暴露的能力 |
-| plugin marketplace / registry | 集中索引外部团队 plugin |
+| SDK Plugin Protocol 的 registry | 集中索引外部团队写的 Python plugin（`entry_points` 之上的发现层）——计划中 |
+| Krowwork 市场插件包（`plugin.json`）生产上架链 | 开发规范已公开（[`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md)）；**提交 / 审核 / 分发安装三段：规划 / 实验·以平台公告为准** |
 | Wasm / Pyodide 沙盒 | 高安全级别的 plugin 运行时隔离 |
 | 多语言 SDK（TypeScript / Rust） | 让前端 / Rust 工程师也能写 plugin |
 
@@ -118,7 +136,7 @@
 - ✅ Step 2 P1（`with_default_model`→6 个 `with_<cat>_model`（chore/sdk-model-selection-api 2026-05-15）/ `with_replay_store` / `MCPServerPlugin` form-C）全部完成
 - ✅ Step 2 P1 `Agent.run_stream()` 流式 API（PR #316，2026-05-15）：`StreamItem` envelope + 同步生成器 + 20 unit tests + CI smoke 防回归
 - ✅ Step 2 P2 visual_inspect plugin 完整公开（PR #239，2026-05-13）
-- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详 [`eula-mock-legal-review-feedback.md`](./eula-mock-legal-review-feedback.md)
+- ✅ Step 2 P2 EULA 模拟法务 review（chore/eula-legal-review-2026-05-15）：v1.0 → v1.1，3 P0 + 4 P1 + 5 P2 修订 + 6 条新增标准条款（§13-18）+ Appendix C 三层 consent 机制；详内部法务 review 记录（不公开）
 - 🚧 Step 2 P2 EULA 后续阻塞：(a) 商务决策 3 项（governing law / liability floor / consent 机制 mandatory level）；(b) 持证律师签字（建议中国大陆 + 香港双 review，~14 天）；(c) Cloud 端 + CLI 端同意机制实施
 - 🚧 Step 2 P2 剩余：`domain pack ontology editor + custom entity 抽取`；视外部团队反馈优先度决定开工时机
 - ❌ Step 2 BYO LLM provider 已决策不做（见上表注释）
@@ -128,7 +146,7 @@
 - ✅ PyPI 主站已稳定迭代（`0.8.12.10` 已发）；EULA 仍处 v1.1 DRAFT（good-faith disclosure）
 - 🚧 EULA v1.x EFFECTIVE：等真律师签字（建议中国大陆 + 香港双 review，~14 天），预计 **2026-06-19 (T+35)** 可达成；签字后下版 hotfix 发布移除 disclosure
 - 🚀 M9 runtime W1-W4 上线节奏：W1 = 2026-05-17 周 / W4 = 2026-06；2026-05-17 决策：跳过封闭 Pilot，直接 Public Beta（任何 KROW_API_KEY 即可装）
-- ✅ 公开文档完整：quickstart / external-developer-onboarding / runtime-install / advanced-development-guide / api-reference / roadmap / EULA 7 份对外文档同步自 monorepo
+- ✅ 公开文档完整：quickstart / external-developer-onboarding / runtime-install / headless-deployment / advanced-development-guide / api-reference / plugin-marketplace-guide / roadmap / EULA 9 份对外文档同步自 monorepo（2026-10-23 更新）
 - 🚧 Cookbook 真实 LLM E2E real-run blocked：staging gateway LLM 端 **未部署**（pk-pilot- key 走 staging 时 `AuthExpiredError`），需 Cloud team 部署 staging gateway 的 LLM proxy 后才能跑真实 LLM；framework + skip 行为已落地（local 上跑需 prod sk- key + `KROW_REAL_LLM_E2E=1`）
 - ✅ **2026-05-19 W4 self-side followups（PR #384）已合**：`AgentBuilder.with_base_url(url)` API + `tests/sdk/test_cloud_runtime_proxy_acceptance.py` §8 F1-F13 骨架（13+1 case，等 prod gateway 一键跑）+ `sdk-cookbook-smoke.yml` matrix 扩 v3 三 demo + `sdk-install-cli-publish.yml` 独立发布 workflow（待 release engineer 配 OIDC trusted publisher 后即可发 PyPI）
 

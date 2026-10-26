@@ -15,7 +15,8 @@
   自带 CJK 字体处理 / reportlab backend / 完整样式系统）。
   cookbook 教学点：**外部 plugin 与 Krow builtin 工具自动同 ToolManager 单例**——
   你写自己的 plugin 不等于"重头造每件事"，应该和内置工具组合。
-- TURBO 边界：所有工具是 System 1（不调 LLM；deterministic；unit-test 100% 覆盖）
+- System 1 / System 2 边界（klik 继承原则）：所有工具是 System 1
+  （不调 LLM；deterministic；unit-test 100% 覆盖）
 - 错误信息：黄金模板（原因 + 位置 + 修法）+ 错误降级演示（encoding fallback）
 - 输入鲁棒：path 接受 str/Path、encoding 接受多种大小写
 - 输出格式：扁平 JSON + summary 字段在首位（LLM 友好）
@@ -502,7 +503,7 @@ def compute_correlation(
 # §1.6 配色查表工具（System 1 deterministic）
 # ============================================================
 #
-# 数据可视化的配色不应该让 LLM 凭感觉配 —— 见 AGENTS.md §0.1 TURBO 哲学：
+# 数据可视化的配色不应该让 LLM 凭感觉配 —— 见 SDK 进阶指南 §1 klik 继承原则：
 # "颜色对查表是 System 1 工具的范例（pptx_color_pair_picker）"。
 #
 # 这里 demo 一个最小 palette：按数据类型查色，调用方按 column index 取色。
@@ -1061,7 +1062,7 @@ class DataAnalystProgressListener:
 # §5. GatePlugin × 2（v2 新增：硬守门 / fail-loud）
 # ============================================================
 #
-# 设计哲学（与 AGENTS.md §0.1 TURBO 哲学对齐）：
+# 设计哲学（与 SDK 进阶指南 §1 klik 继承原则对齐）：
 # - Gate = System 1 deterministic 闸门（不调 LLM；零成本；100% 可重放）
 # - Gate vs Hint：Gate 硬挡（block）；Hint 软提示（仅参考）
 # - 真实业务理由：数据分析场景常含 PII（个人身份信息），LLM 上下文一旦

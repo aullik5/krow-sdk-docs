@@ -3,12 +3,10 @@
 > 给"已读完 [`quickstart.md`](./quickstart.md)、写过第一个 plugin"的外部开发者。
 > 本文档解释**写 plugin 的实战最佳实践**，让你的 plugin 能与 SDK 主路径协同得当（不撞规则、不翻车、不踩坑）。
 > 阅读节奏：约 60 分钟通读 + 写 plugin 时按需回查。
-> 本文档与 SDK 主仓内部使用的 [`AGENTS.md`](https://pypi.org/project/krow-agent-sdk/) 元规则同源（提炼对外公开级内容）。
+> 本文档与 SDK 主仓内部使用的工程元规则同源（提炼对外公开级内容）；**适用 `krow-agent-sdk` 0.9.5+（默认运行模式 klik）**。
+> **本文讲的 plugin = SDK Plugin Protocol**（Python 协议类，装进你自己宿主的 agent）。要上架到 Krowwork 插件市场、装给平台组员的 **Krowwork 市场插件包（`plugin.json`）** 是另一套格式，见 [`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md)，两者不要混用。
 
-> **本文档与 [`concepts/`](./concepts/) 目录的边界**（按 [Diátaxis](https://diataxis.fr/) 框架）：
-> - 本文档 = **How-to**（"应该怎么写好 plugin"）— 实战最佳实践 + 反模式
-> - [`concepts/`](./concepts/) = **Explanation**（"krow 内部如何工作 / 为什么这样设计"）— Agent lifecycle / Progressive Execution / Budget / ConcludeGuard / ExperienceMemory
-> 两者互补，不重复。如果你想理解机制而不仅仅是"按规矩写"，先去看 `concepts/`。
+> **本文档的定位**（按 [Diátaxis](https://diataxis.fr/) 框架）：**How-to**（"应该怎么写好 plugin"）— 实战最佳实践 + 反模式。机制层的解释（Agent lifecycle / Progressive Execution / Budget / ConcludeGuard / ExperienceMemory）散见 [`api-reference.md`](./api-reference.md) 各章与 §9–§10，本文不重复展开。
 
 ---
 
@@ -17,7 +15,7 @@
 | 章节 | 主题 | 何时读 |
 |---|---|---|
 | §0 | 价值观（准确性 > 完整性 > 速度 > 成本） | 写代码前 |
-| §1 | TURBO 哲学（两条总则：①语义/语法分工 System 1/System 2 + ②finished artifact 优先 + 近因效应锚定） | 设计任何决策前 |
+| §1 | klik 继承原则（原「TURBO 哲学」两条总则：①语义/语法分工 System 1/System 2 + ②finished artifact 优先 + 近因效应锚定；§1.10 = klik 新增总则 + 运行模式事实 + 四种 plugin 形态） | 设计任何决策前 |
 | §2 | Plugin 设计 5 大原则（SSOT / OCP / SRP / DRY / 复用） | 写 plugin 前 |
 | §3 | ToolPlugin 设计哲学（功能强大 + Agent 友好接口） | 写 ToolPlugin |
 | §4 | ACTPlugin / extended.md 编写最佳实践（§4.11 = 用 `SKILL.md` 写 ACT，不写 Python 的那条路） | 写 ACTPlugin |
@@ -67,11 +65,13 @@
 
 ---
 
-## §1 TURBO 哲学（**Krow Agent 的灵魂**）
+## §1 klik 继承原则（**Krow Agent 的灵魂**，原「TURBO 哲学」）
 
-### 1.1 一句话总结（**TURBO = 两条总则**）
+> **命名说明**：0.9.5 之前这一章叫「TURBO 哲学」，TURBO 同时也是旧运行模式的名字。0.9.5 起默认运行模式是 **klik**，本章两条总则连同 §0 的价值观排序，作为 klik 的「**继承不变**」三条原封保留——只是不再叫 TURBO。turbo 运行模式仅作**回退模式**（平台计划退役——治理决定，非代码现状），本文不再提供 turbo 用法，也不写兼容指导；klik 自己新增的总则与运行模式事实见 §1.10；本章 0.9.5 之前的原文见 [`archive/turbo-legacy.md`](./archive/turbo-legacy.md)（仅归档，不作推荐）。
 
-TURBO 哲学由**两条总则**构成，未来你只需记住"TURBO 哲学"这一个概念即涵盖两条：
+### 1.1 一句话总结（**继承原则 = 两条总则**）
+
+klik 继承原则由**两条总则**构成，记住这两条即可：
 
 > **总则①（分工）："语义交给 LLM、语法交给系统。"**
 > 非确定性的语义 / 决策 / 创意 → LLM（System 2）；确定性需求 → System 1 工具 / 闸门。详 §1.2–§1.5。
@@ -123,7 +123,7 @@ TURBO 哲学由**两条总则**构成，未来你只需记住"TURBO 哲学"这�
 
 #### 反模式 C：System 1 工具内调 LLM
 
-ToolPlugin 内部**绝不能** `import openai` / `import httpx` 调 LLM。这违反 TURBO 边界，破坏 unit test 100% 覆盖能力。
+ToolPlugin 内部**绝不能** `import openai` / `import httpx` 调 LLM。这违反 System 1 / System 2 分工边界，破坏 unit test 100% 覆盖能力；klik 下这类"聪明工具"还会被 `krow tool` 桥直接拒绝（标 `[llm]`，不进模型的工具表）。
 
 如果工具确实需要 LLM 输出，**让 ToolManager 之外的 ACT 调度逻辑**处理（即由主 agent 调用一个 LLM-driven 路径替代该工具）。
 
@@ -264,6 +264,40 @@ syntax_semantic_ratio = (你 plugin 月度新增 python LOC) / (LLM 月度 token
 单元测试 100% 绿但视觉/语义级 metric 持续逊于 baseline (没人测整体输出质量).
 
 **判定铁律**: 任何 LLM-facing 模块必须有**视觉/语义级 metric** (字数 / 元素密度 / 像素 diff / NPS / ...) 作为 PR 验收门, 不只看代码 coverage.
+
+### 1.10 klik：0.9.5 起的默认运行模式（新增总则 + 运行模式事实 + 四种 plugin 形态）
+
+#### 1.10.1 klik 新增总则（在 §1.1 两条继承原则之上）
+
+| 总则 | 一句话 | 对你写 plugin 的含义 |
+|---|---|---|
+| **一环一脑** | 每次 run 只有一条对话、一个决策者：写下一条动作的，必须是刚看完上一条观察的那次 LLM 调用；系统不设第二个会"拍板"的 LLM（无预写命令的 planner、无决策菜单、无 LLM 验收员） | 不要在 plugin 里再起一个"小脑"替模型做决定；工具是确定性器件，判断留给模型 |
+| **shell 为轴、文件为接口** | 执行主轴是 shell 与文件系统：能力以可执行物形态存在（`krow <子命令>`，`--help` 即文档，stdout 结果 / stderr 错误 / rc 语义），模型只保留 `read / grep / glob / edit / write` 五把薄工具，中间产物以文件传递 | **新增能力 = 新增 CLI 子命令或 MCP**，不是新增工具 schema / ACT / hint / 菜单；长文本参数走 `--arg-file k=<文件>` |
+| **观察诚实** | 错误永远是错误（`rc ≠ 0` / `{"error": …}` 一律以失败入账并把原文放进观察）；截断必带句柄；观察原样不摘要 | 工具出错返回 `{"error": "原因"}`，不抛异常也不吞错；别在返回里做"二次摘要" |
+| **账为事实、效应为准** | 每个动作一行账；决策、验收、复盘都读账，不读模型自述；"声称交付"在账上无效应即未交付 | 产物写到文件系统上可被 `read` 的位置；不要靠返回值里的一句"已完成" |
+| **骨架有预算、能力无菜单** | 系统骨架（身份 + 槽契约 + 工具一句话 + `krow --help` 入口 + 账摘要）有硬顶；ACT 文档、工具 schema、hint、菜单一律不注入，能力按需（`--help` / `krow skill show` / 搜索） | 你的 ToolPlugin 在骨架里只有一句话 + 名字；参数靠 `krow tool help <名>`，所以 `input_schema` 每个字段都要有 `description` |
+| **验证是一步，不是一道闸** | 验收由模型以命令执行（`pytest` / `krow check …` / `krow deliver --check`），输出进账；系统只保留 immune（写盘槽位、路径防伪、安全）与 anti_explosion（预算、墙钟、熔断）两类反射 | GatePlugin 仍是同一条门（见 §5.2），但 quality / closure 类检查退为模型可调用的只读事实，不拦步 |
+| **在途即效应、开工者必见账** | 一件事一旦有人动手，盘上与账上的痕迹就是效应；开工前先看账，同题在途就接着做 | 与 plugin 代码无关，但写 ACT / SKILL 文案时不要教模型"先确认没人做过再开始"——那是账的事 |
+
+#### 1.10.2 运行模式事实（按代码，不按愿望）
+
+| 事实 | 取值 |
+|---|---|
+| 可选值 | `turbo` / `klik` / `solution`（`AgentBuilder.with_run_mode()` 只接受 `turbo` 与 `klik`，大小写不敏感；空值 / 未知值 / `solution` 抛 `ValueError`） |
+| 优先级（高 → 低） | `task_context["run_mode"]`（单次 run）> `AgentBuilder.with_run_mode()`（实例）> 环境变量 `KROW_RUN_MODE`（进程 / 容器）> 安装默认 `agent.run_mode`（0.9.5 起 = `klik`） |
+| 配置写错 | 未知值打 warning 并回落 turbo——配置错误必须可闻，所以别靠拼错来"关掉"某模式 |
+| turbo 的地位 | **回退模式**：代码路径保留（`KROW_RUN_MODE=turbo` 可切），平台计划退役（治理决定，非代码现状）。新项目不要按 turbo 写文案；本文不提供 turbo 用法与兼容指导 |
+
+#### 1.10.3 你的 plugin 在 klik 下的四种形态
+
+| 形态 | 你写的东西 | klik 下模型怎么用它 | 纪律 |
+|---|---|---|---|
+| **A · 薄工具** | `ToolPlugin.get_tools()` 里的确定性工具（§3） | `krow tool list` 发现（带 `[plugin]`）→ `krow tool help <名>` 看参数 → `krow tool run <名> --arg k=v` / `--arg-file k=<文件>` 调用；也可用 ```` ```tool ```` 块直呼 | 零 LLM、同输入同输出；出错 `{"error"}` → `krow tool run` rc=1（`--json` 时 stdout 为空，原因在 stderr）；只往返回值 / 交付位写结果 |
+| **B · 厚流程** | `ACTPlugin` 的 `extended.md` 方法论，或直接用 `SKILL.md`（§4.11） | 只读投影：`krow skill show act:<name>`；骨架里只有一行指针，不注入全文 | 写成"什么时候用、一步步怎么做、出错怎么办"的成品说明（总则②）；不要写"请先调用 X 工具"这类旧式调度口吻 |
+| **C · 内嵌 LLM 的工具** | 工具内部再调模型的"聪明工具" | **被拒绝**（`[llm]`）：拆成确定性部分（形态 A）+ 模型自己想（一环一脑） | 见 §1.4 反模式 C、§6.2 |
+| **D · 平台 MCP / 连接器** | `MCPServerPlugin`（`api-reference.md` §5.7，experimental）或市场插件包的 `mcp.json` | 工具表里按 MCP 名单出现；平台侧拦截族（`krow mail / team / deliver …`）由平台提供，不由你的 plugin 提供 | 新能力优先做成 CLI 子命令或 MCP，而不是新 schema / hint |
+
+`HintPlugin`（§5.1）在 klik 下的位置：骨架不注入 hint 栈，所以"软提示"退化为**写进 SKILL / ACT 文案里的成品说明**或工具 `description`；凡是想靠 hint 约束行为的，照旧改成 Gate 或物理移除（§1.4 反模式 A）。
 
 ---
 
@@ -486,7 +520,7 @@ Error: invalid argument
 
 ### 3.7 红线
 
-- ❌ ToolPlugin 内调 LLM（System 1 工具禁止 — TURBO 边界）
+- ❌ ToolPlugin 内调 LLM（System 1 工具禁止 — 继承原则总则①；klik 下会被 `krow tool` 桥拒绝，标 `[llm]`）
 - ❌ 加 hint 教 LLM "别用某工具" → 物理移除工具 / `with_disabled_tools()` 闸住
 - ❌ 工具数 > 5 共享同一动词 → 合并 + 参数分流
 - ❌ 输出嵌套 3 层以上 JSON → 平铺
@@ -534,6 +568,8 @@ ACT (Activity / Capability Tier) = **一组工具 + 一份 hint 模板 + 一个�
 LLM 不直接看完整工具列表（太长 → 注意力分散），而是按"当前任务意图"匹配出 1-3 个最相关的 ACT，每个 ACT 内的工具与 hint 才被注入到 prompt。
 
 **简单类比**：ACT = 一个"工种"，里面有该工种的工具箱（tools）+ 工种说明书（hint）+ 招呼语（intent description）。
+
+> **klik 下的形态**（0.9.5 起默认）：ACT 不再作为 hint 栈注入 prompt，而是**只读投影**——模型用 `krow skill show act:<name>` 读它，骨架里只有一行指针（`task_context.act_name` 给出）。所以本章对 `extended.md` 的全部写法要求仍然成立（它就是模型读到的成品说明，总则②），但"注入时机 / hot path"类的描述在 klik 下不适用；想用纯文档写 ACT 走 §4.11 的 `SKILL.md` 路径。
 
 ### 4.2 ACT 文件结构
 
@@ -1144,6 +1180,8 @@ skill 走**白名单**语义：只能引用**已存在的**工具，不注册新
 
 **关键约束**：HintPlugin 输出是**给 LLM 看的**，**不能**直接控制 agent 行为。如果你要"强制不让某事发生" → GatePlugin。
 
+> **klik 下的形态**：骨架有预算、hint 不注入（§1.10.1）。HintPlugin 在 klik 下不会出现在模型的系统骨架里；同样的领域知识请写成 SKILL / ACT 文案（形态 B）或工具 `description`，让模型按需 `krow skill show` / `krow tool help` 读到。新项目不要以 hint 作为主要交付手段。
+
 ```python
 from typing import Optional
 
@@ -1221,6 +1259,8 @@ agent = (
 ### 5.2 GatePlugin（**硬**守门）
 
 `Gate` = 在 agent conclude 之前插入的"检查闸"，不通过就**fail-loud**。
+
+> **klik 下的形态**：Gate 仍是同一条门，但「验证是一步，不是一道闸」（§1.10.1）——系统只保留 immune（写盘槽位、路径防伪、保护文件、安全）与 anti_explosion（预算、墙钟、熔断、循环）两类反射；quality / closure 类检查退为模型可调用的只读事实（`krow check …`），模型在最终回答前自己跑验证、输出进账。所以把 Gate 用在**安全与资源类硬约束**上，业务质量检查更适合做成可被 `krow check` 调用的确定性工具（形态 A）。
 
 **典型用例**：
 
@@ -1750,7 +1790,7 @@ from krow_agent_sdk.llm import build_chat_message, build_chat_messages
 # build_chat_messages(system, user) -> list[dict]
 ```
 
-> ⚠️ **TURBO 边界**：System 1 工具内**禁止**调 LLM。LLM-driven 工具的合理形态是把工具上层"ACT-内 ReACT 循环"作为驱动方，工具本身仍是 deterministic helper。详 §1.4 反模式 C。
+> ⚠️ **继承原则总则①（System 1 / System 2 边界）**：System 1 工具内**禁止**调 LLM。LLM-driven 工具的合理形态是把工具上层的模型循环作为驱动方，工具本身仍是 deterministic helper；klik 下工具内调模型的"聪明工具"会被 `krow tool` 桥拒绝（`[llm]`）。详 §1.4 反模式 C、§1.10.3 形态 C。
 
 ### 6.3 EventBus（只读视图）
 
@@ -2148,7 +2188,7 @@ def test_my_journey_real_llm(real_llm_available):
 
 > 凡违反这一节的设计，**99% 概率会出 bug**。请逐条核对。
 
-### 8.1 TURBO 边界违反
+### 8.1 继承原则（System 1 / System 2 边界）违反
 
 | 反模式 | 铁证 | 修法 |
 |---|---|---|
@@ -2494,7 +2534,7 @@ litsci 是"基于 SDK 开发、独立配置三注册表"的活例子（源码 `p
 
 #### 判据纪律：三条
 
-**① 零 LLM**。执行器是 System-1：确定性、可 unit test、毫秒级。要语义的部分留给它注入的那一步——`purpose` 里把"做什么、为什么、不要再做什么"写成**成品指令**（TURBO 总则②），参数由 micro LLM 按语义填。写成"继续处理"这种零件文案等于什么都没说。
+**① 零 LLM**。执行器是 System-1：确定性、可 unit test、毫秒级。要语义的部分留给它注入的那一步——`purpose` 里把"做什么、为什么、不要再做什么"写成**成品指令**（继承原则总则②），参数由 micro LLM 按语义填。写成"继续处理"这种零件文案等于什么都没说。
 
 **② 自判适用性**。不认自己这一族就返 `None`，别靠注册顺序抢。判据要读**你的领域产物**，不要读"过了多少拍"——后者会在 agent 正常跑别的步骤时假开火。
 
@@ -2941,7 +2981,9 @@ SSE 透出为 `agent.terminal.executed` / `agent.terminal.jobs_aborted`，同时
 - [`quickstart.md`](./quickstart.md)：5 分钟入门 + 5 类 plugin 范例
 - [`external-developer-onboarding.md`](./external-developer-onboarding.md)：第 1 周节奏 + 3 种领域适配
 - [`runtime-install.md`](./runtime-install.md)：runtime wheel 装机指南
-- [`roadmap.md`](./roadmap.md)：SDK 进度 + milestone
+- [`plugin-marketplace-guide.md`](./plugin-marketplace-guide.md)：Krowwork 市场插件包（`plugin.json`）开发与上架——与本文的 SDK Plugin Protocol 是两套东西
+- [`roadmap.md`](./roadmap.md)：SDK 进度 + milestone（含 0.9.5 klik 与 turbo 回退口径）
+- [`archive/turbo-legacy.md`](./archive/turbo-legacy.md)：0.9.5 之前「TURBO 哲学」章节原文（仅归档，不作推荐、不提供兼容指导）
 
 ---
 

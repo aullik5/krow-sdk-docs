@@ -144,7 +144,7 @@ class TestBoundedAndAccounted:
         assert sid in getattr(exe, "_best_effort_step_ids", set())
 
     def test_purpose_tells_the_llm_what_to_do_instead(self):
-        """成品指令：说清改做什么 + 明确不要再做什么（TURBO 总则②）。"""
+        """成品指令：说清改做什么 + 明确不要再做什么（klik 继承原则总则②）。"""
         _, _, _, action = self._fire_once()
         purpose = action.new_step.purpose
         assert "不要再重试下载" in purpose

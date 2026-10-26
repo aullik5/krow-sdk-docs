@@ -50,7 +50,7 @@ python main.py --cancel <resume_token>
 
 1. **确认门是 System 1 闸门**：`cad_apply_param_change` 是高代价副作用工具
    （真实场景 = 改模 + 重新仿真数小时）。哪怕 LLM 忘了请示，框架也会在
-   计划步骤调用它之前挂起等 approve——这是"语法交给系统"的 TURBO 哲学落地。
+   计划步骤调用它之前挂起等 approve——这是 klik 继承原则"语法交给系统"的落地。
 2. **LLM 发问是 System 2 语义判断**：什么时候信息不足、问什么问题，
    由 LLM 决定（`request_human_input` 工具）；ACT 扩展指南里立了
    "禁止瞎猜数值"的纪律。

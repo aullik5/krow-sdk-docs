@@ -1,6 +1,6 @@
 # Krow Agent SDK Headless 部署指南（容器 / 服务端）
 
-> **当前状态（2026-05-21）** ✅：自 `krow-agent-sdk 0.8.12.15` 起，headless（无桌面 IDE）
+> **当前状态（2026-10-23，示例 pin `0.9.5.27`）** ✅：自 `krow-agent-sdk 0.8.12.15` 起，headless（无桌面 IDE）
 > 场景下 `pip install krow-agent-sdk` + `KROW_API_KEY` 即可装上即跑——**无需** mock
 > `app.container`、**无需** root 权限、**无需**写 `site-packages/`。
 > 本文档覆盖 KrowChat 等外部团队最常用的两种部署形态：
@@ -59,7 +59,7 @@ WORKDIR /home/krow
 
 # Step 2: pip install SDK（合并到单一 RUN 层；同样为避免 multi-RUN 瞬态 bug）
 # 注：[all] extras 包含 office/knowledge/remote/visual；按需可缩为 [office] 等
-RUN pip install --user --no-cache-dir "krow-agent-sdk[all]==0.9.2.10"
+RUN pip install --user --no-cache-dir "krow-agent-sdk[all]==0.9.5.27"
 
 # Step 3: 一等公民环境变量（0.8.12.15 起 SDK 直接读 KROW_DATA_DIR）
 ENV PATH="/home/krow/.local/bin:$PATH" \
@@ -101,6 +101,7 @@ docker run --rm -e KROW_API_KEY=sk-user-xxxxx my-krow-agent:0.1
 |---|---|---|---|
 | `KROW_API_KEY` | **应用层读** → 显式传 `AgentBuilder.with_krow_api_key(...)` | ✅ | Krow Cloud 鉴权 token |
 | `KROW_DATA_DIR` | **SDK 自动读** (`modules/utils/portable_path.py` 0.8.12.15+) | 推荐 | 显式指定可写数据目录；**不设**时按 XDG / `~/Library/Application Support` / `%APPDATA%` 回退。**设了但不可写 → 启动期 fail-loud，不静默换目录**（见 [Q11](#q11-启动即崩无法建立可写目录--krow_data_dir)） |
+| `KROW_RUN_MODE` | SDK 自动读（0.9.5+） | 可选 | 运行模式。**不设即 `klik`**（0.9.5 起的安装默认，`config/module_config.json` 的 `agent.run_mode`）；`turbo` 仅作回退模式（平台计划退役，治理决定、非代码现状），新部署不要默认设它。优先级：`task_context["run_mode"]` > `AgentBuilder.with_run_mode()` > 本变量 > 安装默认 |
 | `KROW_BASE_URL` | **应用层读** → 显式传 `AgentBuilder.with_base_url(...)` | 可选 | 自定义 Cloud endpoint（staging / 私有化部署） |
 | `PYTHONUNBUFFERED=1` | Python runtime | 推荐 | 容器内日志即时输出 |
 | `KROW_SDK_TERMINAL_EXECUTE` | **SDK 自动读** | 可选 | 终端执行工具三态开关：headless 场景**默认开**（免确认 + `container` profile）；多租户 / 网络未收紧时设 `0` 关闭（详 §5.4） |
@@ -182,7 +183,7 @@ CMD ["python", "-m", "my_app"]
 FROM pytorch/pytorch:2.4.0-cuda12.4-cudnn9-runtime
 
 # 注：pytorch 镜像默认 root；如要切非 root 自己加 useradd
-RUN pip install --no-cache-dir "krow-agent-sdk[office]==0.9.2.10"
+RUN pip install --no-cache-dir "krow-agent-sdk[office]==0.9.5.27"
 
 ENV KROW_DATA_DIR=/workspace/krow_data
 # ...

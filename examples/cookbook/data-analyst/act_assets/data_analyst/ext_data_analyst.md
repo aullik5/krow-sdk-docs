@@ -43,7 +43,7 @@ BudgetSpec），覆盖真实业务场景：
    - 数值列分布 → `sequential`（ColorBrewer Blues 9）
    - 分类列对比 → `categorical`（Tableau 10，色盲友好）
    - 正负指标（如相关系数）→ `diverging`（红蓝 11）
-   - **铁律**：不要让 LLM 凭感觉配色（违反 §0.1 TURBO 哲学）
+   - **铁律**：不要让 LLM 凭感觉配色（违反 klik 继承原则：语法交系统）
 
 6. **基于数据 + 异常 + 相关性 + 配色写 markdown**（System 2，LLM 在 ReACT 循环内组织）
    - **6 段结构**（合规审计标准格式）：
@@ -124,7 +124,7 @@ Audit 是给审计员看的归档（保留 90 天 / 1 年）。
 | LLM 看 preview_rows 自己算 mean | 调 `data_analyst_compute_stats` |
 | LLM 凭感觉判断 "A 和 B 应该有相关" | 调 `data_analyst_compute_correlation` |
 | LLM 凭感觉判断"哪行是异常" | 调 `data_analyst_detect_anomalies` |
-| LLM 凭感觉配色（违反 TURBO 哲学）| 调 `data_analyst_pick_palette` |
+| LLM 凭感觉配色（违反 klik 继承原则：语法交系统）| 调 `data_analyst_pick_palette` |
 | 跳过 read_csv 直接 compute_stats | 先 read 看 columns 再决定要 stats 哪些列 |
 | 跳过 write_report 直接 word_smart_export | 必须先 write_report 落 markdown，再 word_smart_export |
 | **cookbook plugin 自己造 render_pdf 工具** | 用 Krow 内置 `word_smart_export`（SSOT 复用） |
@@ -156,7 +156,7 @@ LLM 在 ReACT 循环内会**统一看到这两类工具**，按 ACT 推荐工作
 - ✅ `compute_stats`：deterministic 化 + 自动归一返回结构；保留
 - ✅ `detect_anomalies`：Krow 内置**完全无**异常检测能力；**必须保留**
 - ✅ `compute_correlation`：deterministic 化 + 自动 top-N + 防 LLM 编造；保留
-- ✅ `pick_palette`：deterministic 配色查表（违反 TURBO 给 LLM 凭感觉配色）；保留
+- ✅ `pick_palette`：deterministic 配色查表（让 LLM 凭感觉配色违反 klik 继承原则）；保留
 - ✅ `write_report`：薄包装 + OutputPathGate 守门；保留
 - ❌ ~~`render_pdf`~~：Krow 已有 word_smart_export；**不写**（v2 移除）
 

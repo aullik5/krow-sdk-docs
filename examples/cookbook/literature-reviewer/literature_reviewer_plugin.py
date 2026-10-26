@@ -27,7 +27,7 @@
    - 学术场景一般不接 BI dashboard / Prometheus
    - EventListener + 进度日志足够
 
-4. **TURBO 哲学严格执行**
+4. **klik 继承原则（System 1 / System 2 分工）严格执行**
    - embedding + 聚类 = System 1（数值 / 图论计算）
    - 综述章节起草 = System 2（LLM 在 ACT 流程内组织）
 
@@ -217,7 +217,7 @@ def extract_paper_metadata(
         file_path: ``path`` 的同义别名。**必须在 input_schema 里声明**——
             ProgressiveExecutor 会把 planner constraints 里不在 schema 的键静默
             drop（``planner constraints drop 1 unknown keys … ['file_path']``），
-            未声明的别名到不了这里。TURBO 总则①：从 LLM 的近端语义字段推导，
+            未声明的别名到不了这里。klik 继承原则总则①：从 LLM 的近端语义字段推导，
             不要求模型记住"系统接口"叫什么。
 
     Returns:
