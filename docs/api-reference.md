@@ -401,6 +401,7 @@ agent = (
 | **作用域** | 注入到 3 处 SSOT（`config.settings.module_interfaces.krow.api_base_url` / 已注册 `LLMProvider.api_url` / `KrowLLMProvider._api_base`）；所有 LLM / image / OCR / metadata 调用均路由到该 URL |
 | **不调** | 默认走 `https://api.krow.cn`（生产）|
 | **多次调** | 后调覆盖前调（last-call-wins） |
+| **海外模型** | 不受本方法影响：海外模型的目录、探测与调用走 `module_config.json` 的 `krow.overseas_api_base_url`（出厂 `https://api.krowagent.com`；置空串 = 本部署没有海外网关，一个海外请求都不发） |
 
 ```python
 # 1. Staging 联调（pk-pilot- key）
