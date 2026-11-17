@@ -105,9 +105,10 @@ docker run --rm -e KROW_API_KEY=sk-user-xxxxx my-krow-agent:0.1
 | `KROW_BASE_URL` | **应用层读** → 显式传 `AgentBuilder.with_base_url(...)` | 可选 | 自定义 Cloud endpoint（staging / 私有化部署） |
 | `PYTHONUNBUFFERED=1` | Python runtime | 推荐 | 容器内日志即时输出 |
 | `KROW_SDK_TERMINAL_EXECUTE` | **SDK 自动读** | 可选 | 终端执行工具三态开关：headless 场景**默认开**（免确认 + `container` profile）；多租户 / 网络未收紧时设 `0` 关闭（详 §5.4） |
-| `KROW_MODEL_DEGRADATION` | **SDK 自动读** (`modules/ai/krow/chat_degradation.py`) | 可选 | 对话模型临时降级，**默认开**：配置的模型确定跑不动（上游配额耗尽 / 网关拒收 / 供给连续中断）时换一个模型把这次调用做完，冷却到期先试回原模型；每次换都有 WARNING 日志、`ai.model_degraded` 事件和交付正文里的 `model_degraded` 披露块。设 `off` 关闭 —— 原模型不可用时直接报错，不换模型 |
+| `KROW_MODEL_DEGRADATION` | **SDK 自动读** (`modules/ai/krow/chat_degradation.py`) | 可选 | 对话模型临时降级，**默认开**：配置的模型确定跑不动（上游配额耗尽 / 网关拒收 / 供给连续中断）时换一个模型把这次调用做完，冷却到期先试回原模型（配额耗尽 / 网关拒收两类在后台试，见 `KROW_MODEL_RESTORE_PROBE`）；每次换都有 WARNING 日志、`ai.model_degraded` 事件和交付正文里的 `model_degraded` 披露块。设 `off` 关闭 —— 原模型不可用时直接报错，不换模型 |
 | `KROW_MODEL_FALLBACKS` | **SDK 自动读** | 可选 | 逗号分隔的替代模型，按先后试；**设了就只用这些**。不设时从服务端模型目录推断（优先不同供给渠道、同区域、价位相近） |
 | `KROW_MODEL_RESTORE_AFTER_S` | **SDK 自动读** | 可选 | 原模型被挂起多久后回头试（秒，默认 600；供给中断类最多 120；回头试仍失败则翻倍，封顶 3600） |
+| `KROW_MODEL_RESTORE_PROBE` | **SDK 自动读** | 可选 | 回头试不占用户的回合，**默认开**：原模型因「上游配额耗尽 / 网关拒收」被挂起时，冷却到期后的那一次调用仍由替代模型作答，SDK 在后台用一个一句话的最小请求问一次网关（同一个进程里每个冷却期只问一次，之后启动的进程读回记录也不再问；同时活着的几个进程各问一次。发出时先按仍不可用把冷却翻倍并落盘，网关收了就撤回，下一次调用亲自试原模型、它成功才切回）。后台连续问过 3 次之后，下一次到期由真实调用亲自试。真实调用亲自试之前同样先按仍不可用记账（冷却翻倍；后台刚问通的那一种沿用当前冷却、不加码）：等到明确失败就按回头试失败入账（冷却 = 动身前的两倍），等到与原模型无关的错就撤回；没等到答复（这一次调用被取消、调用方给的时间用完、进程被收走）账留着，下一次调用不再撞原模型。已经被取消、或调用方剩下的时间从一开始就不够一次读的调用，这一次按从前直接打原模型：事先不记账，也不发那一问（成功照旧切回，明确拒收照旧按回头试失败入账）；那一问和先记账的亲自试留给下一次有时间的调用。供给中断类不走这一步。设 `off` 退回从前：冷却到期后的那一次调用直接试原模型、事先不记账（欠费模型的拒绝要等网关排完队才回来时，这段时间占着用户那一轮） |
 | `KROW_MODEL_DEGRADATION_STATE` | **SDK 自动读** | 可选 | 挂起记录落盘的文件路径，让「原模型欠费、已换替代」跨 pod 轮换保留——新进程第一次调用直接走替代，不再撞一次原模型（真机 403 最慢 180 多秒才回）。不设时：有 `KROW_DATA_DIR` 就写 `{data_dir}/model_degradation/suspended.json`，没有就不落盘；设 `off` 强制不落盘 |
 
 > ⚠️ **注意区分**：`KROW_API_KEY` / `KROW_BASE_URL` 是 **cookbook convention**，**SDK 不会自动读** —— 你的入口代码需要 `os.environ.get(...)` 后显式传给 `AgentBuilder`。表里标「**SDK 自动读**」的（`KROW_DATA_DIR` / `KROW_SDK_TERMINAL_EXECUTE` / `KROW_MODEL_*`）才是 SDK 直接消费的。`KROW_DATA_DIR` 的 SSOT 参 `modules/utils/portable_path.py:ENV_KROW_DATA_DIR`。
