@@ -108,6 +108,7 @@ docker run --rm -e KROW_API_KEY=sk-user-xxxxx my-krow-agent:0.1
 | `KROW_MODEL_DEGRADATION` | **SDK 自动读** (`modules/ai/krow/chat_degradation.py`) | 可选 | 对话模型临时降级，**默认开**：配置的模型确定跑不动（上游配额耗尽 / 网关拒收 / 供给连续中断）时换一个模型把这次调用做完，冷却到期先试回原模型；每次换都有 WARNING 日志、`ai.model_degraded` 事件和交付正文里的 `model_degraded` 披露块。设 `off` 关闭 —— 原模型不可用时直接报错，不换模型 |
 | `KROW_MODEL_FALLBACKS` | **SDK 自动读** | 可选 | 逗号分隔的替代模型，按先后试；**设了就只用这些**。不设时从服务端模型目录推断（优先不同供给渠道、同区域、价位相近） |
 | `KROW_MODEL_RESTORE_AFTER_S` | **SDK 自动读** | 可选 | 原模型被挂起多久后回头试（秒，默认 600；供给中断类最多 120；回头试仍失败则翻倍，封顶 3600） |
+| `KROW_MODEL_DEGRADATION_STATE` | **SDK 自动读** | 可选 | 挂起记录落盘的文件路径，让「原模型欠费、已换替代」跨 pod 轮换保留——新进程第一次调用直接走替代，不再撞一次原模型（真机 403 最慢 180 多秒才回）。不设时：有 `KROW_DATA_DIR` 就写 `{data_dir}/model_degradation/suspended.json`，没有就不落盘；设 `off` 强制不落盘 |
 
 > ⚠️ **注意区分**：`KROW_API_KEY` / `KROW_BASE_URL` 是 **cookbook convention**，**SDK 不会自动读** —— 你的入口代码需要 `os.environ.get(...)` 后显式传给 `AgentBuilder`。表里标「**SDK 自动读**」的（`KROW_DATA_DIR` / `KROW_SDK_TERMINAL_EXECUTE` / `KROW_MODEL_*`）才是 SDK 直接消费的。`KROW_DATA_DIR` 的 SSOT 参 `modules/utils/portable_path.py:ENV_KROW_DATA_DIR`。
 
