@@ -28,14 +28,28 @@
  *   wiki-create:<rel_path>     → 红链：目标页不存在，触发"创建此页"
  *   wiki-upgrade:<rel_path>    → stub 页升级为完整页
  *   source-navigate:<source>   → 跳转到原始来源文件
+ *
+ * 0.2.0（供需要自管 innerHTML 的宿主——如 React 适配器先消毒再插入——分步复用，结果与 renderPage 一致）：
+ *   markdownToHtml(text)        → 纯字符串（不碰 DOM）
+ *   buildInfoBar(frontmatter)   → 信息条 HTML 字符串
+ *   postProcess(containerEl)    → callout / mermaid / echarts / highlight / katex 后处理
+ *   extractTocFrom(containerEl) → 该容器内 h1–h3 的 TOC（不再要求 id="wiki-content"）
+ *   transformWikiLinks(html)    → [[内链]] → <a href="wiki:…" class="wiki-link">
  */
 
 const WIKI_LINK_RE = /\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g;
 
+/**
+ * HTML 文本转义。与此前「建 div → appendChild(textNode) → 读 innerHTML」逐字节同结果（HTML 序列化
+ * 算法对文本节点只转义 & < > 与 U+00A0 四个字符），但不碰 DOM：`markdownToHtml` 因此可在没有 document 的
+ * 环境（单测 / SSR / Worker）里跑，宿主也能先消毒再自己插进 DOM。
+ */
 function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.appendChild(document.createTextNode(String(s == null ? '' : s)));
-  return d.innerHTML;
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/\u00a0/g, '&nbsp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 const hasMermaid = () => typeof window !== 'undefined' && typeof window.mermaid !== 'undefined';
@@ -92,8 +106,8 @@ function buildMarkdownIt(MarkdownIt, { allowHtml = false } = {}) {
   return md;
 }
 
-/** [[wiki-link]] → <a href="wiki:..."> （扩展语法的 |rel:..|weight:.. 元数据用于显示文本剥离） */
-function transformWikiLinks(html) {
+/** [[wiki-link]] → <a href="wiki:..."> （扩展语法的 |rel:..|weight:.. 元数据用于显示文本剥离）。0.2.0 起导出。 */
+export function transformWikiLinks(html) {
   return html.replace(WIKI_LINK_RE, (_m, target) => {
     const t = target.trim();
     return `<a href="wiki:${encodeURI(t)}" class="wiki-link">[[${escapeHtml(t)}]]</a>`;
@@ -202,7 +216,8 @@ function processHighlight(container) {
   });
 }
 
-function buildInfoBar(frontmatter) {
+/** 信息条（✨ 自动整理 · 置信度 · 来源）HTML 字符串；`renderPage` 把它放在正文之前。0.2.0 起导出。 */
+export function buildInfoBar(frontmatter) {
   const fm = frontmatter || {};
   const confIcon = { high: '\u{1F7E2}', medium: '\u{1F7E1}', low: '\u{1F534}' }[fm.confidence] || '\u26AA';
   const rawSources = fm.sources || [];
@@ -214,14 +229,31 @@ function buildInfoBar(frontmatter) {
     ' \u00B7 \u6765\u6E90: ' + sourcesHtml + '</div>';
 }
 
-function extractToc() {
+/**
+ * 从**这个容器**里提 TOC（h1–h3；没有 id 的标题按文本补 id）。0.2.0 起导出：宿主自己把 HTML 插进 DOM 后调它，
+ * 容器不必再叫 `#wiki-content`。`renderPage` 内部也走它（容器是 `#wiki-content` 时与旧的全局查询结果逐项相同）。
+ */
+export function extractTocFrom(containerEl) {
   const headings = [];
-  document.querySelectorAll('#wiki-content h1, #wiki-content h2, #wiki-content h3').forEach((h) => {
+  containerEl.querySelectorAll('h1, h2, h3').forEach((h) => {
     const id = h.id || h.textContent.replace(/\s+/g, '-');
     h.id = id;
     headings.push({ level: parseInt(h.tagName[1], 10), text: h.textContent, id });
   });
   return headings;
+}
+
+/**
+ * 对已插进 DOM 的正文做桌面同款后处理：callout → mermaid → echarts → highlight → KaTeX（顺序关键：先把
+ * mermaid / echarts 代码块换掉，再高亮其余代码块，最后渲染公式）。0.2.0 起导出：宿主（如 React 适配器）先用
+ * `markdownToHtml` 拿字符串、消毒、自己插入，再调这一步，与 `renderPage` 的结果一致。
+ */
+export function postProcess(containerEl) {
+  processCallouts(containerEl);
+  processMermaid(containerEl);
+  processECharts(containerEl);
+  processHighlight(containerEl);
+  processKaTeX(containerEl);
 }
 
 /**
@@ -251,13 +283,8 @@ export function createWikiRenderer({ MarkdownIt, allowHtml = false } = {}) {
   function renderPage(containerEl, markdownText, frontmatter) {
     const bodyHtml = markdownToHtml(markdownText);
     containerEl.innerHTML = buildInfoBar(frontmatter) + bodyHtml;
-    // 后处理顺序关键：先 Mermaid/ECharts 替换代码块，再 highlight 其余代码块，最后 KaTeX
-    processCallouts(containerEl);
-    processMermaid(containerEl);
-    processECharts(containerEl);
-    processHighlight(containerEl);
-    processKaTeX(containerEl);
-    return extractToc();
+    postProcess(containerEl);
+    return extractTocFrom(containerEl);
   }
 
   /** 仅渲染 dashboard / 自定义 HTML（不走 markdown，不加 info-bar） */

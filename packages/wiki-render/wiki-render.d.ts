@@ -42,5 +42,19 @@ export interface ParsedWikiHref {
 /** 解析 wiki 自定义 scheme 链接（供宿主拦截 click 用）。 */
 export function parseWikiHref(href: string): ParsedWikiHref | null;
 
+// ─── 0.2.0：分步复用（宿主自管 innerHTML 时用；三步合起来 = renderPage）───────────────
+
+/** 信息条（✨ 自动整理 · 置信度 · 来源）的 HTML 字符串；renderPage 把它放在正文之前。 */
+export function buildInfoBar(frontmatter?: WikiFrontmatter | null): string;
+
+/** 对已插进 DOM 的正文做后处理：callout → mermaid → echarts → highlight → KaTeX（与桌面同序）。 */
+export function postProcess(container: HTMLElement): void;
+
+/** 从该容器里提 h1–h3 的 TOC（没有 id 的标题按文本补 id）；容器不必叫 #wiki-content。 */
+export function extractTocFrom(container: HTMLElement): TocHeading[];
+
+/** `[[内链]]`（含 `|rel:…` 等边语义段）→ `<a href="wiki:…" class="wiki-link">[[target]]</a>`。 */
+export function transformWikiLinks(html: string): string;
+
 declare const _default: typeof createWikiRenderer;
 export default _default;

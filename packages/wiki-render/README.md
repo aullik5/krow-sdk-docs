@@ -84,6 +84,25 @@ containerEl.addEventListener('click', (e) => {
 | `wiki-upgrade:<rel_path>` | stub 页升级为完整页 | 触发对该 stub 的补全任务 |
 | `source-navigate:<source>` | 跳转到原始来源文件 | 打开来源文档预览 |
 
+## 分步复用：宿主自管 innerHTML 时（0.2.0 起）
+
+React / Vue 这类宿主通常不让第三方直接 `container.innerHTML = …`（要先消毒、要走框架自己的插入口）。
+0.2.0 把 `renderPage` 拆成三步导出，三步合起来与 `renderPage` 结果一致：
+
+```js
+import { createWikiRenderer, buildInfoBar, postProcess, extractTocFrom } from "@krow/wiki-render";
+
+const renderer = createWikiRenderer({ MarkdownIt });
+const html = buildInfoBar(frontmatter) + renderer.markdownToHtml(markdownText); // ① 纯字符串，不碰 DOM
+containerEl.innerHTML = DOMPurify.sanitize(html);                                  // ② 宿主自己消毒 + 插入
+postProcess(containerEl);                                                          // ③ callout / mermaid / echarts / highlight / katex
+const headings = extractTocFrom(containerEl);                                      //    TOC 从这个容器提，不再要求 id="wiki-content"
+```
+
+`markdownToHtml` 自 0.2.0 起不依赖 `document`（文本转义改为与 DOM 序列化逐字节同结果的纯字符串实现），
+可在单测 / Worker 里直接跑。`transformWikiLinks(html)` 也一并导出。vendoring 这份源码的下游（如 krowworker
+`web/packages/krow-wiki-render/`）按 git tag `wiki-render-v<版本>` 同步并用 sha 守门。
+
 ## SSOT 收口（已落地，避免两份漂移）
 
 > 历史风险：若 Web 与桌面各自维护一份 CSS，半年后视觉必然分叉（违反 DRY/SSOT）。本包已做

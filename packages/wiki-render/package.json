@@ -1,6 +1,6 @@
 {
   "name": "@krow/wiki-render",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Krow Wiki 内容区渲染套件：与桌面 Lite 版 WikiView 视觉一致的 Markdown→HTML 渲染引擎 + 主题（框架无关）。",
   "type": "module",
   "license": "MIT",
